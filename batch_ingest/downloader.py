@@ -5,7 +5,7 @@ import cbpro
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from trading.candlesticks import CoinbaseCandleCollector
+from batch_ingest.candlesticks import CoinbaseCandleCollector
 
 
 class MarketDownloader:
@@ -16,8 +16,7 @@ class MarketDownloader:
 
     def download(self, start: datetime, end: datetime,
                  markets: t.Optional[t.List[str]] = None) -> None:
-        frequencies = {'15m': timedelta(minutes=15),
-                       '5m': timedelta(minutes=5)}
+        frequencies = {'1m': timedelta(minutes=1)}
         if markets is None:
             products = cbpro.PublicClient().get_products()
             markets = [description['id'] for description in products]
@@ -35,4 +34,4 @@ class MarketDownloader:
 
 if __name__ == '__main__':
     downloader = MarketDownloader('../.market_data')
-    downloader.download(datetime(2021, 5, 1), datetime.now())
+    downloader.download(datetime(2021, 5, 1), datetime(2021, 5, 30, 20, 46))

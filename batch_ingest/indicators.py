@@ -37,14 +37,20 @@ def moon_score(df: pd.DataFrame) -> pd.Series:
     mom_5m, mom1_5m = mom.loc['5m'], mom1.loc['5m']
     moon_5m = (mom_5m > mom1_5m) * (mom_5m - mom1_5m)
     # candle for t-15min is most recent at t
-    adj = moon_15m.unstack(0).shift(freq='15min').resample('5min').ffill(2)
+    adj = moon_15m.unstack(0).shift(1).resample('5min').ffill(2)
     return moon_5m.unstack(0) + adj
+
+
+def usd_mask(df: pd.DataFrame) -> pd.DataFrame:
+    cols = df.columns
+    is_usd = cols.str.endswith('-USD')
+    return df[cols[is_usd]]
 
 
 def main() -> None:
     df = pd.read_parquet('../.market_data')
     scores = moon_score(df)
-    scores[['ADA-USD', 'BTC-USD', 'ETH-USD']].plot()
+    scores[['ADA-USD', 'BTC-USD', 'ETH-USD', 'LTC-USD']].plot()
     plt.show()
 
 
