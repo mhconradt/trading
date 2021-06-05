@@ -59,12 +59,15 @@ def main() -> None:
     products = get_usd_products()
     client = InfluxDBClient(influx_db_settings.INFLUX_URL,
                             influx_db_settings.INFLUX_TOKEN,
+                            org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
     sink = InfluxDBTradeSink(EXCHANGE_NAME, client.write_api(),
+                             org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG,
-                             bucket=influx_db_settings.INFLUX_BUCKET)
-    sink = BatchingSink(64, sink)
+                             bucket="trades")
+    sink = BatchingSink(16, sink)
     # TODO: Persist watermarks
+    # Characteristics for storing watermarks: high availability only
     # If watermarks are zero, eventually downloads the DB in O(1) space and O(n) time.
     watermarks = {}
     while True:
@@ -75,6 +78,8 @@ def main() -> None:
                 time.sleep(1)
         except KeyboardInterrupt:
             break
+        except Exception:
+            pass
         finally:
             print('howdy')
             client.close()
@@ -82,6 +87,7 @@ def main() -> None:
             sink.flush()
             # only if we know these were actually sent to DB
             watermarks = client.watermarks
+        # out here so it doesn't wait on keyboard interrupt
         time.sleep(15)
 
     # maybe persist watermarks elsewhere?

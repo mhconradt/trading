@@ -64,7 +64,6 @@ class InfluxDBTradeSink(RecordSink):
 
     def send_many(self, trades: t.Iterable[dict], /) -> None:
         points = []
-        print(trades)
         for trade in trades:
             p = Point("matches") \
                 .tag('exchange', self.exchange) \
@@ -83,12 +82,10 @@ class InfluxDBPointSink(RecordSink):
         self._write_kwargs = kwargs
 
     def send(self, point: Point, /) -> None:
-        print(f'writing {point}')
         self.writer.write(*self._write_args, record=point,
                           **self._write_kwargs)
 
     def send_many(self, points: t.Iterable[Point], /) -> None:
-        print(f'writing {len(points)} points')
         self.writer.write(*self._write_args, record=points,
                           **self._write_kwargs)
 
