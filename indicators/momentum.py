@@ -1,10 +1,14 @@
 from datetime import timedelta
 
 from influxdb_client import InfluxDBClient
-from pandas import DataFrame
+from pandas import Series
 
 
-class CandleSticks:
+def momentum(close: Series, span: int = 1, lead: int = 0):
+    return (close.shift(lead) / close.shift(lead + span)) - 1.
+
+
+class Momentum:
     def __init__(self, db: InfluxDBClient, exchange, frequency, start,
                  stop=timedelta(0)):
         self.db = db
@@ -13,29 +17,30 @@ class CandleSticks:
         self.start = start
         self.stop = stop
 
-    def compute(self) -> DataFrame:
+    def compute(self) -> Series:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
-                      'start': self.start,
+                      'start': self.start - self.frequency,
                       'stop': self.stop}
         df = query_api.query_data_frame("""
             from(bucket: "candles")
             |> range(start: start, stop: stop)
             |> filter(fn: (r) => r["_measurement"] == "candles_${string(v: freq)}")
             |> filter(fn: (r) => r["exchange"] == exchange)
-            |> pivot(rowKey: ["market", "_time"], columnKey: ["_field"], valueColumn: "_value")
-            |> yield()
+            |> filter(fn: (r) => r["_field"] == "close")
+            |> yield(name: "close")
         """, data_frame_index=['market', '_time'],
                                         params=parameters)
-        return df[['open', 'high', 'low', 'close', 'volume']]
+        close = df['_value'].rename('close')
+        return close.groupby(level=0).apply(momentum)
 
 
 def main(influx: InfluxDBClient):
     _start = time.time()
-    sticks = CandleSticks(influx, 'coinbasepro', timedelta(minutes=15),
-                          timedelta(hours=-1))
-    print(sticks.compute())
+    mom = Momentum(influx, 'coinbasepro', timedelta(minutes=15),
+                   timedelta(hours=-1))
+    print(mom.compute())
     print(time.time() - _start)
 
 
