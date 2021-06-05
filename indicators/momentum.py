@@ -1,11 +1,7 @@
 from datetime import timedelta
 
 from influxdb_client import InfluxDBClient
-from pandas import Series
-
-
-def momentum(close: Series, span: int = 1, lead: int = 0):
-    return (close.shift(lead) / close.shift(lead + span)) - 1.
+from pandas import DataFrame, Series
 
 
 class Momentum:
@@ -22,26 +18,38 @@ class Momentum:
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
                       'start': self.start - self.frequency,
-                      'stop': self.stop}
+                      'stop': self.stop,
+                      'duration': 1 * self.frequency}
         df = query_api.query_data_frame("""
-            from(bucket: "candles")
+            at = from(bucket: "candles")
             |> range(start: start, stop: stop)
             |> filter(fn: (r) => r["_measurement"] == "candles_${string(v: freq)}")
             |> filter(fn: (r) => r["exchange"] == exchange)
             |> filter(fn: (r) => r["_field"] == "close")
-            |> yield(name: "close")
-        """, data_frame_index=['market', '_time'],
-                                        params=parameters)
-        close = df['_value'].rename('close')
-        return close.groupby(level=0).apply(momentum)
+            
+            before = at |> timeShift(duration: duration)
+            
+            join(tables: {at: at, before: before}, 
+                 on: ["market", "_time"], 
+                 method: "inner")
+            |> map(fn: (r) => ({_time: r["_time"], 
+                market: r["market"], 
+                momentum: (r["_value_at"] / r["_value_before"]) - 1.0
+                }))
+            |> yield()
+        """, data_frame_index=['market', '_time'], params=parameters)
+        return df.momentum
 
 
 def main(influx: InfluxDBClient):
     _start = time.time()
-    mom = Momentum(influx, 'coinbasepro', timedelta(minutes=15),
+    frequency = timedelta(minutes=1)
+    mom = Momentum(influx, 'coinbasepro', frequency,
                    timedelta(hours=-1))
-    print(mom.compute())
-    print(time.time() - _start)
+    values = mom.compute().unstack(0).resample(frequency).asfreq()
+    # example of increasing momentum check
+    increasing = values > values.shift(1)
+    print(increasing.iloc[-1])
 
 
 if __name__ == '__main__':
