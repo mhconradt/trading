@@ -1,22 +1,28 @@
-from datetime import datetime
+from datetime import timedelta
 
 from influxdb_client import InfluxDBClient
 from pandas import DataFrame
 
 
 class MostRecentPrice:
-    def __init__(self, db: InfluxDBClient, exchange: str = 'coinbasepro'):
+    def __init__(self, db: InfluxDBClient, exchange: str = 'coinbasepro',
+                 start: timedelta = timedelta(minutes=-1),
+                 stop: timedelta = timedelta(0)):
         self.exchange = exchange
         self.db = db
+        self.start = start
+        self.stop = stop
 
     def compute(self) -> DataFrame:
         query_api = self.db.query_api()
-        parameters = {'_exchange': self.exchange}
+        parameters = {'exchange': self.exchange,
+                      'start': self.start,
+                      'stop': self.stop}
         df = query_api.query_data_frame("""
             from(bucket: "trades")
-                |> range(start: -1m)
+                |> range(start: start, stop: stop)
                 |> filter(fn: (r) => r["_measurement"] == "matches")
-                |> filter(fn: (r) => r["exchange"] == _exchange)
+                |> filter(fn: (r) => r["exchange"] == exchange)
                 |> filter(fn: (r) => r["_field"] == "price")
                 |> last()
                 |> yield(name: "price")
