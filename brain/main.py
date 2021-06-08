@@ -20,6 +20,9 @@ STOP_LOSS_RATIO = Decimal('0.965')
 TAKE_PROFIT_RATIO = Decimal('1.01')
 
 
+# TODO: Position tracking
+
+
 def liquidate(client: AuthenticatedClient):
     for account in client.get_accounts():
         if account['currency'] == 'USD':
@@ -133,10 +136,12 @@ def main() -> None:
     usd_account_id, = [account['id'] for account in coinbase.get_accounts() if
                        account['currency'] == 'USD']
     positions = []
+    # TODO: Track positions
+    start_time = coinbase.get_time()['iso']
     while True:
         ticks = ticker.compute()
         ticks = ticks[ticks.index.str.endswith('-USD')]
-        # TODO: Handle stale / missing data?
+        # TODO: Handle stale / missing data
         positions = manage_positions(coinbase, positions, ticks.price)
         available = Decimal(coinbase.get_account(usd_account_id)['available'])
         mom_5 = momentum_5m.compute()
@@ -153,9 +158,12 @@ def score_assets(mom_15: Series, mom_5: Series) -> Series:
     this_mom15 = mom_15.iloc[-1]
     last_mom5 = mom_5.iloc[-2]
     last_mom15 = mom_15.iloc[-2]
+    # either this...
+    positive = (this_mom5 > 0.) & (last_mom5 > 0.) & (this_mom15 > 0.) & (
+                last_mom15 > 0.)
     increasing = (this_mom5 > 0.) & (this_mom15 > 0.)
     accelerating = (this_mom5 > last_mom5) & (this_mom15 > last_mom15)
-    buy_mask = increasing & accelerating
+    buy_mask = positive & increasing & accelerating
     mom5_diff = this_mom5 - last_mom5
     mom15_diff = this_mom15 - last_mom15
     scores = buy_mask * (mom5_diff + mom15_diff)

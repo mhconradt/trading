@@ -42,7 +42,7 @@ if __name__ == '__main__':
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG)
 
-    ticker = Ticker(_influx)
+    ticker = Ticker(_influx, start=timedelta(days=-1))
     while True:
         tickers = ticker.compute()
         print(tickers)
