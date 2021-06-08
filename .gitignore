@@ -1,2 +1,3 @@
 .market_data
 **/*.pyc
+realtime_ingest/watermarks.json

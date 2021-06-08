@@ -38,7 +38,7 @@ class Momentum:
                 }))
             |> yield()
         """, data_frame_index=['market', '_time'], params=parameters)
-        return df.momentum
+        return df.momentum.unstack(0)
 
 
 def main(influx: InfluxDBClient):

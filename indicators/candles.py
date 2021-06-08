@@ -19,6 +19,7 @@ class CandleSticks:
                       'freq': self.frequency,
                       'start': self.start,
                       'stop': self.stop}
+        # catchup mechanism for candlesticks?
         df = query_api.query_data_frame("""
             from(bucket: "candles")
             |> range(start: start, stop: stop)
@@ -34,7 +35,7 @@ class CandleSticks:
 def main(influx: InfluxDBClient):
     _start = time.time()
     sticks = CandleSticks(influx, 'coinbasepro', timedelta(minutes=15),
-                          timedelta(hours=-1))
+                          timedelta(hours=-3))
     print(sticks.compute())
     print(time.time() - _start)
 

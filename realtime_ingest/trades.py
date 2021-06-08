@@ -1,10 +1,11 @@
+import json
 import time
 import sys
 import typing as t
 
 from influxdb_client import InfluxDBClient
 import cbpro
-from helper.coinbase import get_usd_products
+from helper.coinbase import get_usd_product_ids
 
 from settings import influx_db as influx_db_settings
 from realtime_ingest.sink import RecordSink, BatchingSink, InfluxDBTradeSink
@@ -56,7 +57,7 @@ class TradesWebsocketClient(cbpro.WebsocketClient):
 
 
 def main() -> None:
-    products = get_usd_products()
+    products = get_usd_product_ids()
     client = InfluxDBClient(influx_db_settings.INFLUX_URL,
                             influx_db_settings.INFLUX_TOKEN,
                             org_id=influx_db_settings.INFLUX_ORG_ID,
@@ -65,11 +66,12 @@ def main() -> None:
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG,
                              bucket="trades")
-    sink = BatchingSink(16, sink)
+    sink = BatchingSink(32, sink)
     # TODO: Persist watermarks
     # Characteristics for storing watermarks: high availability only
     # If watermarks are zero, eventually downloads the DB in O(1) space and O(n) time.
-    watermarks = {}
+    with open('watermarks.json', 'r') as f:
+        watermarks = json.load(f)
     while True:
         try:
             client = TradesWebsocketClient(sink, watermarks, products=products)
@@ -88,9 +90,9 @@ def main() -> None:
             # only if we know these were actually sent to DB
             watermarks = client.watermarks
         # out here so it doesn't wait on keyboard interrupt
-        time.sleep(15)
-
-    # maybe persist watermarks elsewhere?
+        time.sleep(1)
+    with open('watermarks.json', 'w') as f:
+        json.dump(watermarks, f)
 
     if client.error:
         sys.exit(1)

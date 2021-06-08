@@ -68,6 +68,7 @@ class InfluxDBTradeSink(RecordSink):
             p = Point("matches") \
                 .tag('exchange', self.exchange) \
                 .tag('market', trade['product_id']) \
+                .tag('side', trade['side'])\
                 .time(trade['time']) \
                 .field('price', Decimal(trade['price'])) \
                 .field('size', Decimal(trade['size']))
