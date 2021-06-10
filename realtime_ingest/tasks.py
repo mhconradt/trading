@@ -17,9 +17,6 @@ class ReplayHook:
     def subscribe(self, task_def: "TaskDefinition", to: str):
         """
         Subscribe task to bucket.
-        :param task_def:
-        :param to:
-        :return:
         """
         self.subscriptions[to].add(task_def)
 
@@ -169,21 +166,33 @@ def main():
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG)
     tasks_api = _influx.tasks_api()
-    candles_1m.initialize(tasks_api)
+    candles_1m.initialize(tasks_api, id='candles_1m',
+                          org_id=influx_db_settings.INFLUX_ORG_ID,
+                          org=influx_db_settings.INFLUX_ORG)
     candles_1m.create()
-    candles_5m.initialize(tasks_api)
+    candles_5m.initialize(tasks_api, id='candles_5m',
+                          org_id=influx_db_settings.INFLUX_ORG_ID,
+                          org=influx_db_settings.INFLUX_ORG)
     candles_5m.create()
-    candles_15m.initialize(tasks_api)
+    candles_15m.initialize(tasks_api, id='candles_15m',
+                           org_id=influx_db_settings.INFLUX_ORG_ID,
+                           org=influx_db_settings.INFLUX_ORG)
     candles_15m.create()
-    candles_1h.initialize(tasks_api)
+    candles_1h.initialize(tasks_api, id='candles_1h',
+                          org_id=influx_db_settings.INFLUX_ORG_ID,
+                          org=influx_db_settings.INFLUX_ORG)
     candles_1h.create()
     candles_4h.initialize(tasks_api, id='candles_4h',
                           org_id=influx_db_settings.INFLUX_ORG_ID,
                           org=influx_db_settings.INFLUX_ORG)
     candles_4h.create()
-    candles_6h.initialize(tasks_api)
+    candles_6h.initialize(tasks_api, id='candles_6h',
+                          org_id=influx_db_settings.INFLUX_ORG_ID,
+                          org=influx_db_settings.INFLUX_ORG)
     candles_6h.create()
-    candles_1d.initialize(tasks_api)
+    candles_1d.initialize(tasks_api, id='candles_1d',
+                          org_id=influx_db_settings.INFLUX_ORG_ID,
+                          org=influx_db_settings.INFLUX_ORG)
     candles_1d.create()
 
 

@@ -107,7 +107,7 @@ def main() -> None:
         finally:
             # catch up from last state
             sink.flush()
-            with open('watermarks.json', 'r') as f:
+            with open('watermarks.json', 'w') as f:
                 json.dump(watermarks, f)
             # only if we know these were actually sent to DB
             watermarks = client.watermarks
