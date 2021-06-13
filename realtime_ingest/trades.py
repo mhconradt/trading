@@ -34,7 +34,7 @@ class TradesWebsocketClient(cbpro.WebsocketClient):
                  **kwargs):
         if 'channels' in kwargs:
             del kwargs['channels']
-        super().__init__(*args, channels=['matches'], **kwargs)
+        super().__init__(*args, channels=['matches', 'heartbeat'], **kwargs)
         self.sink = sink
         # catchup aggregates
         self.watermarks = dict() if watermarks is None else watermarks
