@@ -6,10 +6,6 @@ import typing as t
 from brain.stop_loss import StopLoss
 
 
-class History(t.Protocol):
-    history: t.List["History"]
-
-
 @dataclass
 class DesiredLimitBuy:
     """
@@ -19,7 +15,7 @@ class DesiredLimitBuy:
     size: Decimal
     market: str
 
-    history: t.List[History]
+    history: t.List[object]
 
 
 @dataclass
@@ -34,7 +30,7 @@ class PendingLimitBuy:
     order_id: str
     created_at: datetime
 
-    history: t.List[History]
+    history: t.List[object]
 
 
 @dataclass
@@ -46,7 +42,20 @@ class PendingCancelBuy:
     order_id: str
     created_at: datetime
 
-    history: t.List[History]
+    history: t.List[object]
+
+
+@dataclass
+class ActiveStopLossPosition:
+    price: Decimal
+    size: Decimal
+    fees: Decimal
+    market: str
+
+    stop_loss_order_id: str
+    take_profit_order_id: str
+
+    history: t.List[object]
 
 
 @dataclass
@@ -62,7 +71,7 @@ class ActivePosition:
 
     start: datetime
 
-    history: t.List[History]
+    history: t.List[object]
 
     def __post_init__(self):
         self.stop_loss = StopLoss(price=self.price, size=self.size,
@@ -81,7 +90,7 @@ class DesiredLimitSell:
     size: Decimal
     market: str
 
-    history: t.List[History]
+    history: t.List[object]
 
 
 @dataclass
@@ -96,7 +105,7 @@ class PendingLimitSell:
     order_id: str
     created_at: datetime
 
-    history: t.List[History]
+    history: t.List[object]
 
 
 @dataclass
@@ -108,7 +117,7 @@ class PendingCancelSell:
     order_id: str
     created_at: datetime
 
-    history: t.List[History]
+    history: t.List[object]
 
 
 @dataclass
@@ -121,4 +130,4 @@ class Sold:
     fees: Decimal
     market: str
 
-    history: t.List[History]
+    history: t.List[object]

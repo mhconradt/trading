@@ -1,4 +1,4 @@
-from collections import defaultdict, deque
+from collections import deque
 from datetime import datetime, timedelta
 import dateutil.parser
 from decimal import Decimal
@@ -12,14 +12,20 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             DesiredLimitSell, PendingLimitSell, Sold,
                             PendingCancelBuy,
                             PendingCancelSell)
+from brain.order_tracker import SyncCoinbaseOrderTracker
+
+
+# TODO: Self-trade prevention
+# TODO: Limit # of orders (per product)
 
 
 class PortfolioManager:
     def __init__(self, client: AuthenticatedClient):
         self.client = client
+        self.tracker = SyncCoinbaseOrderTracker(client)
         self.min_position_size = Decimal('10')
-        self.max_positions = 500
-        self.current_positions = 0
+        self.max_positions = 10_000
+        self.position_count = 0
 
         self.buy_age_limit = timedelta(minutes=1)
         self.sell_age_limit = timedelta(minutes=1)
@@ -47,7 +53,7 @@ class PortfolioManager:
         """
         if spending_limit < self.min_position_size:
             return
-        if self.current_positions == self.max_positions:
+        if self.position_count == self.max_positions:
             return
         positive_scores = scores[scores.notna() & scores.gt(0.)]
         ranked_scores = positive_scores.sort_values(ascending=False)
@@ -55,7 +61,7 @@ class PortfolioManager:
         hypothetical_sizes = cumulative_normalized_scores * spending_limit
         hypothetical_sizes_ok = hypothetical_sizes >= self.min_position_size
         min_position_size_limit = np.arange(hypothetical_sizes_ok).max() + 1
-        position_count_limit = self.max_positions - self.current_positions
+        position_count_limit = self.max_positions - self.position_count
         limit = min(min_position_size_limit, position_count_limit)
         if not limit:
             return
@@ -68,7 +74,7 @@ class PortfolioManager:
                                   size=size,
                                   market=market, history=[])
             self.desired_buys.append(buy)
-            self.current_positions += 1
+            self.position_count += 1
         return None
 
     def check_desired_buys(self, market_info: t.Dict[str, dict]) -> None:
@@ -97,19 +103,21 @@ class PortfolioManager:
             order = self.client.place_limit_order(market, side='buy',
                                                   price=str(price),
                                                   size=str(size),
-                                                  time_in_force='GTC')
+                                                  time_in_force='GTC',
+                                                  stp='cn')
             if 'id' not in order:
-                continue
+                continue  # Handle this error
             created_at = dateutil.parser.parse(order['created_at'])
+            order_id = order['id']
+            self.tracker.track(order_id)
             pending = PendingLimitBuy(price, size, market=market,
-                                      order_id=order['id'],
+                                      order_id=order_id,
                                       created_at=created_at, history=[buy])
             self.pending_buys.append(pending)
         # RESET DESIRED BUYS
         self.desired_buys = []
 
-    def check_pending_buys(self, open_orders: t.Dict[str, dict],
-                           done_orders: t.Dict[str, dict],
+    def check_pending_buys(self, order_snapshot: t.Dict[str, dict],
                            server_time: datetime) -> None:
         """
         Using "done" and "open" orders.
@@ -119,25 +127,38 @@ class PortfolioManager:
         """
         next_generation = []  # Word to Bob
         for pending_buy in self.pending_buys:
-            if pending_buy.order_id in open_orders:
+            order_id = pending_buy.order_id
+            if pending_buy.created_at > server_time:
+                # buy was created during this iteration, nothing to do
+                next_generation.append(pending_buy)
+                continue
+            if order_id not in order_snapshot:
+                # buy was canceled externally before being filled
+                # candidate explanation is self-trade prevention
+                self.position_count -= 1
+                continue
+            order = order_snapshot[order_id]
+            status = order['status']
+            # treat these the same?
+            if status in {'open', 'pending', 'active'}:
                 server_age = pending_buy.created_at - server_time
                 time_limit_expired = server_age > self.buy_age_limit
                 if time_limit_expired:
-                    self.client.cancel_order(pending_buy.order_id)
+                    self.client.cancel_order(order_id)
                     history = [pending_buy, *pending_buy.history]
                     cancel_buy = PendingCancelBuy(
                         market=pending_buy.market,
                         price=pending_buy.price,
                         size=pending_buy.size,
-                        order_id=pending_buy.order_id,
+                        order_id=order_id,
                         created_at=pending_buy.created_at,
                         history=history
                     )
                     self.pending_cancel_buys.append(cancel_buy)
                 else:
                     next_generation.append(pending_buy)
-            elif pending_buy.order_id in done_orders:
-                order = done_orders[pending_buy.order_id]
+            elif status == 'done':
+                self.tracker.untrack(order_id)
                 size = Decimal(order['filled_size'])
                 price = Decimal(order['executed_value']) / size
                 fees = Decimal(order['fee'])
@@ -152,8 +173,7 @@ class PortfolioManager:
                                                  history=history)
                 self.active_positions.append(active_position)
             else:
-                next_generation.append(pending_buy)
-                continue
+                raise ValueError(f"Unknown order status {status}")
         # RESET PENDING BUYS
         self.pending_buys = next_generation
 
@@ -186,10 +206,12 @@ class PortfolioManager:
             order = self.client.place_limit_order(sell.market, side='sell',
                                                   price=str(sell.price),
                                                   size=str(sell.size),
-                                                  time_in_force='GTC')
+                                                  time_in_force='GTC',
+                                                  stp='co')
             if 'id' not in order:
                 continue
             order_id = order['id']
+            self.tracker.track(order_id)
             created_at = dateutil.parser.parse(order['created_at'])
             history = [sell, *sell.history]
             pending_sell = PendingLimitSell(price=sell.price, size=sell.size,
@@ -199,8 +221,7 @@ class PortfolioManager:
                                             history=history)
             self.pending_sells.append(pending_sell)
 
-    def check_pending_sells(self, open_orders: t.Dict[str, dict],
-                            done_orders: t.Dict[str, dict],
+    def check_pending_sells(self, order_snapshot: t.Dict[str, dict],
                             server_time: datetime) -> None:
         """
         Using "done" and "open" orders.
@@ -209,25 +230,37 @@ class PortfolioManager:
         """
         next_generation = []
         for pending_sell in self.pending_sells:
-            oid = pending_sell.order_id
-            if oid in open_orders:
+            order_id = pending_sell.order_id
+            if pending_sell.created_at > server_time:
+                # created during this generation, nothing to see here
+                next_generation.append(pending_sell)
+                continue
+            elif order_id not in order_snapshot:
+                # TODO: Pending sell externally cancelled
+                # For now you just end up with a little bit more of what you had
+                self.position_count -= 1
+                continue
+            order = order_snapshot[order_id]
+            status = order['status']
+            if status in {'active', 'pending', 'open'}:
                 server_age = server_time - pending_sell.created_at
                 time_limit_expired = server_age > self.sell_age_limit
                 if time_limit_expired:
-                    self.client.cancel_order(oid)  # TODO: Partial fill.
+                    self.client.cancel_order(order_id)
                     cancellation = PendingCancelSell(
                         market=pending_sell.market,
                         price=pending_sell.price,
                         size=pending_sell.size,
-                        order_id=oid,
+                        order_id=order_id,
                         created_at=pending_sell.created_at,
                         history=[pending_sell,
                                  *pending_sell.history])
                     self.pending_cancel_sells.append(cancellation)
                 else:
                     next_generation.append(pending_sell)
-            elif oid in done_orders:
-                order = done_orders[oid]
+            elif status == 'done':
+                self.tracker.untrack(order_id)
+                # external cancellation without being filled
                 executed_value = Decimal(order['executed_value'])
                 size = Decimal(order['filled_size'])
                 executed_price = executed_value / size
@@ -237,20 +270,24 @@ class PortfolioManager:
                             history=[pending_sell, *pending_sell.history])
                 self.sells.append(sell)
             else:
-                next_generation.append(pending_sell)
+                raise ValueError(f"Unknown status {status}")
         self.pending_sells = next_generation
 
-    def check_cancel_buys(self, open_orders: t.Dict[str, dict],
-                          done_orders: t.Dict[str, dict],
+    def check_cancel_buys(self, order_snapshot: t.Dict[str, dict],
                           server_time: datetime) -> None:
         next_generation: t.List[PendingCancelBuy] = []
         for cancellation in self.pending_cancel_buys:
             order_id = cancellation.order_id
-            if order_id in open_orders:
+            if order_id not in order_snapshot:
+                self.tracker.untrack(order_id)
+                self.position_count -= 1  # canceled without fill
+            order = order_snapshot[order_id]
+            status = order['status']
+            if status == {'active', 'pending', 'open'}:
                 next_generation.append(cancellation)
                 continue
-            elif order_id in done_orders:
-                order = done_orders[order_id]
+            elif status == 'done':
+                self.tracker.untrack(order_id)
                 executed_value = Decimal(order['executed_value'])
                 filled_size = Decimal(order['filled_size'])
                 executed_price = executed_value / filled_size
@@ -263,22 +300,20 @@ class PortfolioManager:
                                                    *cancellation.history])
                 self.active_positions.append(position)
             else:
-                self.current_positions -= 1  # canceled without fill
+                print(order)
+                raise ValueError(f"Unknown status {status}")
         self.pending_cancel_buys = next_generation
 
-    def check_cancel_sells(self, open_orders: t.Dict[str, dict],
-                           done_orders: t.Dict[str, dict],
+    def check_cancel_sells(self, order_snapshot: t.Dict[str, dict],
                            prices: Series) -> None:
         next_generation: t.List[PendingCancelSell] = []
         for cancellation in self.pending_cancel_sells:
             order_id = cancellation.order_id
-            if order_id in open_orders:
-                next_generation.append(cancellation)
-                continue
-            elif order_id in done_orders:
-                order = done_orders[order_id]
-                executed_value = Decimal(order['executed_value'])
-                filled_size = Decimal(order['filled_size'])
+            order = order_snapshot.get(order_id, None)
+            if order is None or order['status'] == 'done':
+                self.tracker.untrack(order_id)
+                e_v = Decimal(order['executed_value'] if order else '0')
+                filled_size = Decimal(order['filled_size'] if order else '0')
                 history = [cancellation, *cancellation.history]
                 remainder = cancellation.size - filled_size
                 if remainder:
@@ -286,15 +321,18 @@ class PortfolioManager:
                                           remainder, cancellation.market,
                                           history=history)
                     self.desired_buys.append(buy)
-                    self.current_positions += 1  # fork
-                if not filled_size:
+                    self.position_count += 1  # fork
+                if order is None or not filled_size:
                     continue
-                executed_price = executed_value / filled_size
+                executed_price = e_v / filled_size
                 sell = Sold(price=executed_price, size=filled_size,
                             fees=Decimal(order['fee']),
                             market=cancellation.market,
                             history=history)
                 self.sells.append(sell)
+                continue
+            elif order['status'] in {'active', 'pending', 'open'}:
+                next_generation.append(cancellation)
         self.pending_cancel_sells = next_generation
 
     def check_sold(self) -> None:
@@ -308,7 +346,7 @@ class PortfolioManager:
                     gain = (sell.price - position.price) * sell.size
                     print(f"{sell.market}: ${gain}")
                     break
-            self.current_positions -= 1
+            self.position_count -= 1
 
     def run(self, get_prices, get_scores) -> t.NoReturn:
         accounts = self.client.get_accounts()
@@ -321,23 +359,16 @@ class PortfolioManager:
             scores = get_scores()
             product_infos = {product['id']: product for product in
                              self.client.get_products()}
-            # TODO: Limit these orders
-            orders = self.client.get_orders(status=['done', 'open'])
-            open_orders = {o['id']: o for o in orders if o['status'] == 'open'}
-            done_orders = {o['id']: o for o in orders if o['status'] == 'done'}
+            snapshot = self.tracker.snapshot()
             fee_info = self.client._send_message('GET', '/fees')
             fee = Decimal(fee_info['taker_fee'])
             time = dateutil.parser.parse(self.client.get_time()['iso'])
             self.check_sold()
-            self.check_cancel_sells(open_orders, done_orders, prices)
-            self.check_pending_sells(open_orders=open_orders,
-                                     done_orders=done_orders,
-                                     server_time=time)
+            self.check_cancel_sells(snapshot, prices)
+            self.check_pending_sells(snapshot, server_time=time)
             self.check_desired_sells()
             self.check_active_positions(prices, fee)
-            self.check_cancel_buys(open_orders, done_orders, time)
-            self.check_pending_buys(open_orders=open_orders,
-                                    done_orders=done_orders,
-                                    server_time=time)
+            self.check_cancel_buys(snapshot, time)
+            self.check_pending_buys(snapshot, server_time=time)
             self.check_desired_buys(product_infos)
             self.queue_buys(prices, scores, available_funds)
