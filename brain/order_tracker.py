@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
+from collections import deque
 from decimal import Decimal
+from threading import Lock
 import typing as t
 
-from cbpro import WebsocketClient
+from cbpro import AuthenticatedClient, WebsocketClient
 
 
 class OrderTracker(ABC):
@@ -11,11 +13,11 @@ class OrderTracker(ABC):
         ...
 
     @abstractmethod
-    def done(self, order_id: str) -> bool:
+    def barrier_snapshot(self) -> t.Tuple[str, dict]:
         ...
 
     @abstractmethod
-    def remaining_size(self, order_id: str) -> Decimal:
+    def snapshot(self) -> dict:
         ...
 
     @abstractmethod
@@ -23,31 +25,33 @@ class OrderTracker(ABC):
         ...
 
 
-class CoinbaseOrderTracker(OrderTracker):
+class SyncCoinbaseOrderTracker(OrderTracker):
+    def barrier_snapshot(self) -> t.Tuple[str, dict]:
+        timestamp = self.client.get_time()['iso']
+        return timestamp, self.snapshot()
+
+    def __init__(self, client: AuthenticatedClient,
+                 watchlist: t.Optional[t.List[str]] = None):
+        self.client = client
+        self.watchlist = [] if watchlist is None else watchlist
+
     def track(self, order_id: str) -> None:
-        self.watched.add(order_id)
+        self.watchlist.append(order_id)
 
-    def done(self, order_id: str) -> bool:
-        return self.server_done[self.client_server_mapping[order_id]]
-
-    def remaining_size(self, order_id: str) -> Decimal:
-        return self.server_remaining_size[self.client_server_mapping[order_id]]
+    def snapshot(self) -> dict:
+        index = len(self.watchlist) - 1
+        snapshot = {}
+        for order in self.client.get_orders(status='all'):
+            for i in range(index, 0, -1):
+                watch = self.watchlist[i]
+                order_id = order['id']
+                index -= 1
+                if watch == order_id:
+                    snapshot[order_id] = order
+                    break
+                else:
+                    self.un_track(watch)
+        return snapshot
 
     def un_track(self, order_id: str) -> None:
-        self.watched.remove(order_id)
-        server_id = self.client_server_mapping[order_id]
-        self.server_done.pop(server_id)
-        self.server_remaining_size.pop(server_id)
-
-    def __init__(self, products: t.List[str], api_key: str, api_secret: str,
-                 api_passphrase: str):
-        self.ws_client = WebsocketClient(products=products,
-                                         channels=['user', 'heartbeat'],
-                                         api_key=api_key,
-                                         api_secret=api_secret,
-                                         api_passphrase=api_passphrase,
-                                         auth=True)
-        self.watched = set()
-        self.client_server_mapping = {}
-        self.server_remaining_size = {}
-        self.server_done = {}
+        self.watchlist.remove(order_id)
