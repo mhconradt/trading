@@ -1,13 +1,35 @@
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 import typing as t
 
 from brain.stop_loss import BasicStopLoss
 
+from abc import ABC, abstractmethod
+
+
+class PositionState(ABC):
+    @property
+    @abstractmethod
+    def previous_state(self) -> t.Optional["PositionState"]:
+        pass
+
+    @property
+    @abstractmethod
+    def state_change(self) -> t.Optional[str]:
+        pass
+
+    def __str__(self) -> str:
+        if self.previous_state:
+            intrinsic = repr(self)
+            return f"{repr(self.previous_state)} -> ({self.state_change}) -> {intrinsic}"
+        else:
+            return repr(self)
+
 
 @dataclass
-class DesiredLimitBuy:
+class DesiredLimitBuy(PositionState):
     """
     We want to buy at most .size of base currency in .market for at most .price
     """
@@ -15,11 +37,12 @@ class DesiredLimitBuy:
     size: Decimal
     market: str
 
-    history: t.List[object]
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
 
 @dataclass
-class PendingLimitBuy:
+class PendingLimitBuy(PositionState):
     """
     We ordered .size of base currency in .market for .price * .size in quote.
     """
@@ -30,11 +53,12 @@ class PendingLimitBuy:
     order_id: str
     created_at: datetime
 
-    history: t.List[object]
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
 
 @dataclass
-class PendingCancelBuy:
+class PendingCancelBuy(PositionState):
     price: Decimal
     size: Decimal
     market: str
@@ -42,24 +66,12 @@ class PendingCancelBuy:
     order_id: str
     created_at: datetime
 
-    history: t.List[object]
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
 
 @dataclass
-class ActiveStopLossPosition:
-    price: Decimal
-    size: Decimal
-    fees: Decimal
-    market: str
-
-    stop_loss_order_id: str
-    take_profit_order_id: str
-
-    history: t.List[object]
-
-
-@dataclass
-class ActivePosition:
+class ActivePosition(PositionState):
     """
     We own .size of base currency in .base.
     We paid .price in .quote and .fees in .quote in fees.
@@ -71,28 +83,33 @@ class ActivePosition:
 
     start: datetime
 
-    history: t.List[object]
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
     def __post_init__(self):
         self.stop_loss = BasicStopLoss(price=self.price, size=self.size)
 
-    def sell(self, price: Decimal) -> bool:
-        return self.stop_loss.trigger(price)
+    def stop_loss(self, price: Decimal) -> bool:
+        return self.stop_loss.trigger_stop_loss(price)
+
+    def take_profit(self, price: Decimal) -> bool:
+        return self.stop_loss.trigger_take_profit(price)
 
 
 @dataclass
-class DesiredMarketSell:
+class DesiredMarketSell(PositionState):
     """
     Sell .size of .base at the market.
     """
     size: Decimal
     market: str
 
-    history: t.List[object]
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
 
 @dataclass
-class PendingMarketSell:
+class PendingMarketSell(PositionState):
     """
     Selling .size of .base at the market.
     """
@@ -102,11 +119,12 @@ class PendingMarketSell:
     order_id: str
     created_at: datetime
 
-    history: t.List[object]
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
 
 @dataclass
-class DesiredLimitSell:
+class DesiredLimitSell(PositionState):
     """
     Sell at most .size of .base for at least .price in .quote.
     """
@@ -114,11 +132,12 @@ class DesiredLimitSell:
     size: Decimal
     market: str
 
-    history: t.List[object]
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
 
 @dataclass
-class PendingLimitSell:
+class PendingLimitSell(PositionState):
     """
     We ordered .price * .size of .quote for .size in .base.
     """
@@ -129,22 +148,24 @@ class PendingLimitSell:
     order_id: str
     created_at: datetime
 
-    history: t.List[object]
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
 
 @dataclass
-class PendingCancelLimitSell:
+class PendingCancelLimitSell(PositionState):
     size: Decimal
     market: str
 
     order_id: str
     created_at: datetime
 
-    history: t.List[object]
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
 
 @dataclass
-class Sold:
+class Sold(PositionState):
     """
     We sold .size of quote currency for .price * .size in base currency.
     """
@@ -153,4 +174,17 @@ class Sold:
     fees: Decimal
     market: str
 
-    history: t.List[object]
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
+
+
+if __name__ == '__main__':
+    desired_buy = DesiredLimitBuy(market='BTC-USD', price=Decimal('42000.'),
+                                  size=Decimal('1.234'))
+    pending_buy = PendingLimitBuy(market=desired_buy.market,
+                                  price=desired_buy.price,
+                                  size=desired_buy.size, order_id='abcdef',
+                                  created_at=datetime.now(),
+                                  previous_state=desired_buy,
+                                  state_change='order created')
+    print(str(pending_buy))
