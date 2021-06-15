@@ -1,25 +1,14 @@
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from dataclasses import dataclass
 from decimal import Decimal
-import time
 
 
 @dataclass
-class StopLoss:
+class BasicStopLoss:
     price: Decimal
     size: Decimal
-    fees: Decimal
 
-    start: datetime
+    stop_loss: Decimal = Decimal('0.975')
+    take_profit: Decimal = Decimal('1.0125')
 
-    stop_loss: Decimal = Decimal('0.965')
-    take_profit: Decimal = Decimal('1.01')
-
-    time: float = field(default_factory=time.monotonic)
-
-    def __post_init__(self):
-        self.last_check = self.start
-
-    def trigger(self, price: Decimal, fee: Decimal, at: datetime) -> bool:
-        if at - self.last_check > timedelta(seconds=15):
-            ...
+    def trigger(self, price: Decimal) -> bool:
+        return not self.stop_loss < price / self.price < self.take_profit

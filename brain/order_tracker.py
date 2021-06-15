@@ -1,19 +1,19 @@
 from abc import ABC, abstractmethod
-from collections import deque
-from decimal import Decimal
-from threading import Lock
+from datetime import datetime
 import typing as t
 
-from cbpro import AuthenticatedClient, WebsocketClient
+import dateutil.parser
+
+from cbpro import AuthenticatedClient
 
 
 class OrderTracker(ABC):
     @abstractmethod
-    def track(self, order_id: str) -> None:
+    def remember(self, order_id: str) -> None:
         ...
 
     @abstractmethod
-    def barrier_snapshot(self) -> t.Tuple[str, dict]:
+    def barrier_snapshot(self) -> t.Tuple[datetime, dict]:
         ...
 
     @abstractmethod
@@ -21,7 +21,7 @@ class OrderTracker(ABC):
         ...
 
     @abstractmethod
-    def untrack(self, order_id: str) -> None:
+    def forget(self, order_id: str) -> None:
         ...
 
 
@@ -35,11 +35,11 @@ class SyncCoinbaseOrderTracker(OrderTracker):
     def active_order_count(self) -> int:
         return len(self.watchlist)
 
-    def track(self, order_id: str) -> None:
+    def remember(self, order_id: str) -> None:
         self.watchlist.append(order_id)
 
-    def barrier_snapshot(self) -> t.Tuple[str, dict]:
-        timestamp = self.client.get_time()['iso']
+    def barrier_snapshot(self) -> t.Tuple[datetime, dict]:
+        timestamp = dateutil.parser.parse(self.client.get_time()['iso'])
         return timestamp, self.snapshot()
 
     def snapshot(self) -> dict:
@@ -62,10 +62,10 @@ class SyncCoinbaseOrderTracker(OrderTracker):
                 else:
                     # watched item was canceled
                     index -= 1
-                    self.un_track(watch)
+                    self.forget(watch)
             else:
                 break
         return snapshot
 
-    def untrack(self, order_id: str) -> None:
+    def forget(self, order_id: str) -> None:
         self.watchlist.remove(order_id)

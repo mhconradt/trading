@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 import typing as t
 
-from brain.stop_loss import StopLoss
+from brain.stop_loss import BasicStopLoss
 
 
 @dataclass
@@ -74,11 +74,35 @@ class ActivePosition:
     history: t.List[object]
 
     def __post_init__(self):
-        self.stop_loss = StopLoss(price=self.price, size=self.size,
-                                  fees=self.fees)
+        self.stop_loss = BasicStopLoss(price=self.price, size=self.size)
 
-    def sell(self, price: Decimal, fee: Decimal) -> bool:
-        return self.stop_loss.trigger(price, fee)
+    def sell(self, price: Decimal) -> bool:
+        return self.stop_loss.trigger(price)
+
+
+@dataclass
+class DesiredMarketSell:
+    """
+    Sell .size of .base at the market.
+    """
+    size: Decimal
+    market: str
+
+    history: t.List[object]
+
+
+@dataclass
+class PendingMarketSell:
+    """
+    Selling .size of .base at the market.
+    """
+    size: Decimal
+    market: str
+
+    order_id: str
+    created_at: datetime
+
+    history: t.List[object]
 
 
 @dataclass
@@ -109,8 +133,7 @@ class PendingLimitSell:
 
 
 @dataclass
-class PendingCancelSell:
-    price: Decimal
+class PendingCancelLimitSell:
     size: Decimal
     market: str
 
