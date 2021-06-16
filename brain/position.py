@@ -1,4 +1,3 @@
-from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -23,9 +22,20 @@ class PositionState(ABC):
     def __str__(self) -> str:
         if self.previous_state:
             intrinsic = repr(self)
-            return f"{repr(self.previous_state)} -> ({self.state_change}) -> {intrinsic}"
+            return f"{str(self.previous_state)} -> ({self.state_change}) -> {intrinsic}"
         else:
             return repr(self)
+
+
+@dataclass(repr=False)
+class RootState(PositionState):
+    number: int
+
+    state_change: t.Optional[str] = None
+    previous_state: t.Optional[PositionState] = None
+
+    def __repr__(self) -> str:
+        return f"#{self.number}"
 
 
 @dataclass
@@ -179,12 +189,14 @@ class Sold(PositionState):
 
 
 if __name__ == '__main__':
+    root = RootState(number=1)
     desired_buy = DesiredLimitBuy(market='BTC-USD', price=Decimal('42000.'),
-                                  size=Decimal('1.234'))
+                                  size=Decimal('1.234'), previous_state=root,
+                                  state_change='buy STRONGLY indicated')
     pending_buy = PendingLimitBuy(market=desired_buy.market,
                                   price=desired_buy.price,
                                   size=desired_buy.size, order_id='abcdef',
                                   created_at=datetime.now(),
                                   previous_state=desired_buy,
                                   state_change='order created')
-    print(str(pending_buy))
+    print(f"{pending_buy}")

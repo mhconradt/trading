@@ -12,7 +12,8 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             DesiredLimitSell, PendingLimitSell, Sold,
                             PendingCancelBuy,
                             PendingCancelLimitSell, DesiredMarketSell,
-                            PendingMarketSell)
+                            PendingMarketSell,
+                            RootState)
 from brain.order_tracker import SyncCoinbaseOrderTracker
 from brain.volatility_cooldown import VolatilityCoolDown
 from indicators import InstantIndicator
@@ -62,6 +63,7 @@ class PortfolioManager:
         self.sells: deque[Sold] = deque()
 
         self.cool_down = VolatilityCoolDown(timedelta(minutes=5))
+        self.next_position_id = 0
 
     def compute_buy_weights(self, scores: Series,
                             spending_limit: Decimal) -> Series:
@@ -102,9 +104,13 @@ class PortfolioManager:
             assert isinstance(weight, Decimal)  # TODO: Remove this if it works
             price = self.prices[market]
             size = weight * spending_limit / price
+            self.next_position_id += 1
+            previous_state = RootState(number=self.next_position_id)
             buy = DesiredLimitBuy(price=price,
                                   size=size,
-                                  market=market)
+                                  market=market,
+                                  previous_state=previous_state,
+                                  state_change=f'buy target {weight:.2f}')
             print(f"{buy}")
             self.desired_limit_buys.append(buy)
             self.position_count += 1
@@ -233,6 +239,7 @@ class PortfolioManager:
                                         previous_state=position,
                                         state_change=state_change)
                 print(f"{sell}")
+                self.cool_down.sold(position.market)
                 self.desired_limit_sells.append(sell)
             else:
                 next_generation.append(position)
