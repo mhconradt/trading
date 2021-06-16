@@ -1,11 +1,8 @@
+import typing as t
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-import typing as t
-
-from brain.stop_loss import BasicStopLoss
-
-from abc import ABC, abstractmethod
 
 
 class PositionState(ABC):
@@ -96,15 +93,6 @@ class ActivePosition(PositionState):
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
-
-    def __post_init__(self):
-        self.stop_loss = BasicStopLoss(price=self.price, size=self.size)
-
-    def stop_loss(self, price: Decimal) -> bool:
-        return self.stop_loss.trigger_stop_loss(price)
-
-    def take_profit(self, price: Decimal) -> bool:
-        return self.stop_loss.trigger_take_profit(price)
 
 
 @dataclass

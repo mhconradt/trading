@@ -13,6 +13,7 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             PendingCancelLimitSell, DesiredMarketSell,
                             PendingMarketSell,
                             RootState)
+from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
 from cbpro import AuthenticatedClient
 from indicators import InstantIndicator
@@ -24,7 +25,8 @@ from indicators import InstantIndicator
 class PortfolioManager:
     def __init__(self, client: AuthenticatedClient,
                  price_indicator: InstantIndicator,
-                 score_indicator: InstantIndicator):
+                 score_indicator: InstantIndicator, stop_loss: SimpleStopLoss,
+                 cool_down: VolatilityCoolDown):
         self.client = client
         self.price_indicator = price_indicator
         self.score_indicator = score_indicator
@@ -60,7 +62,8 @@ class PortfolioManager:
         self.pending_cancel_sells: t.List[PendingCancelLimitSell] = []
         self.sells: t.List[Sold] = []
 
-        self.cool_down = VolatilityCoolDown(timedelta(minutes=5))
+        self.cool_down = cool_down
+        self.stop_loss = stop_loss
         self.next_position_id = 0
         self.gains = Decimal('0')
 
@@ -229,8 +232,9 @@ class PortfolioManager:
         next_generation: t.List[ActivePosition] = []
         for position in self.active_positions:
             price = self.prices[position.market]
-            stop_loss = position.stop_loss(price)
-            take_profit = position.take_profit(price)
+            price_paid = position.price
+            stop_loss = self.stop_loss.trigger_stop_loss(price, price_paid)
+            take_profit = self.stop_loss.trigger_take_profit(price, price_paid)
             if stop_loss or take_profit:
                 state_change = 'stop loss' if stop_loss else 'take profit'
                 sell = DesiredLimitSell(price, position.size,
@@ -525,7 +529,7 @@ class PortfolioManager:
         Record final information about each position.
         """
         while self.sells:
-            sell = self.sells.popleft()
+            sell = self.sells.pop()
             state = sell
             while state:
                 if isinstance(state, ActivePosition):
