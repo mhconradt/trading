@@ -5,6 +5,7 @@ import typing as t
 
 import cbpro
 from influxdb_client import InfluxDBClient
+from influxdb_client.client.write_api import ASYNCHRONOUS
 
 from helper.coinbase import get_usd_product_ids
 from realtime_ingest.sink import RecordSink, BatchingSink, InfluxDBTradeSink
@@ -34,7 +35,7 @@ class TradesWebsocketClient(cbpro.WebsocketClient):
                  **kwargs):
         if 'channels' in kwargs:
             del kwargs['channels']
-        super().__init__(*args, channels=['matches', 'heartbeat'], **kwargs)
+        super().__init__(*args, channels=['matches'], **kwargs)
         self.sink = sink
         # catchup aggregates
         self.watermarks = dict() if watermarks is None else watermarks
@@ -59,19 +60,21 @@ class TradesWebsocketClient(cbpro.WebsocketClient):
         # all markets are now being processed in order
         needs_catch_up = watermark and trade_id > watermark + 1
         all_caught_up = not (any(self.catching_up.values()) or needs_catch_up)
-        self.catching_up[product] = not needs_catch_up
+        self.catching_up[product] = needs_catch_up
         if needs_catch_up:
             print(f'catching up {product} {watermark}->{trade_id}')
             gap = catchup(product, watermark, trade_id)
             for item in gap:
                 self.last_checkpoint = min(self.last_checkpoint, item['time'])
                 self.sink.send(item)
+            print(f'caught up {product}')
         self.sink.send(trade)
         self.watermarks[product] = trade_id
         self.checkpoint_timestamp = max(trade['time'],
                                         self.checkpoint_timestamp)
         if not self.replayed_missed_tasks:
             if all_caught_up:
+                print('replaying')
                 replay.replay("trades", self.last_checkpoint,
                               self.checkpoint_timestamp)
                 self.replayed_missed_tasks = True
@@ -84,11 +87,12 @@ def main() -> None:
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
     replay.initialize(client.tasks_api())
-    sink = InfluxDBTradeSink(EXCHANGE_NAME, client.write_api(),
+    sink = InfluxDBTradeSink(EXCHANGE_NAME,
+                             client.write_api(write_options=ASYNCHRONOUS),
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG,
                              bucket="trades")
-    sink = BatchingSink(32, sink)
+    sink = BatchingSink(4, sink)
     # Characteristics for storing watermarks: high availability only
     # If watermarks are zero, eventually downloads the DB.
     with open('watermarks.json', 'r') as f:
@@ -99,7 +103,7 @@ def main() -> None:
                                            products=products)
             client.start()
             while not client.stop:
-                time.sleep(1)
+                time.sleep(5)
         except KeyboardInterrupt:
             break
         finally:

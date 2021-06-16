@@ -4,12 +4,12 @@ from datetime import timedelta
 from cbpro import AuthenticatedClient
 from influxdb_client import InfluxDBClient
 
+from brain.portfolio_manager import PortfolioManager
+from brain.stop_loss import SimpleStopLoss
+from brain.volatility_cooldown import VolatilityCoolDown
 from indicators import Ticker, MoonShot
 from settings import influx_db as influx_db_settings, \
     coinbase as coinbase_settings, portfolio as portfolio_settings
-from .portfolio_manager import PortfolioManager
-from .stop_loss import SimpleStopLoss
-from .volatility_cooldown import VolatilityCoolDown
 
 logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
                     level=logging.DEBUG)

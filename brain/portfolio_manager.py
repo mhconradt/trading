@@ -17,6 +17,7 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             RootState)
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
+from helper.coinbase import get_iso_time
 from indicators import InstantIndicator
 
 # TODO: Rate limiting
@@ -82,11 +83,13 @@ class PortfolioManager:
         allowed = allowed.difference(self.blacklist)
         scores = scores.loc[allowed]
         positive_scores = scores[scores.notna() & scores.gt(0.)]
+        if not len(positive_scores):
+            return nil_weights
         ranked_scores = positive_scores.sort_values(ascending=False)
         cumulative_normalized_scores = ranked_scores / ranked_scores.cumsum()
         hypothetical_sizes = cumulative_normalized_scores * spending_limit
         hypothetical_sizes_ok = hypothetical_sizes >= self.min_position_size
-        min_position_size_limit = np.arange(hypothetical_sizes_ok).max() + 1
+        min_position_size_limit = int(hypothetical_sizes_ok.sum())
         position_count_limit = self.max_positions - self.position_count
         limit = min(min_position_size_limit, position_count_limit)
         if not limit:
@@ -135,7 +138,7 @@ class PortfolioManager:
         for buy in self.desired_limit_buys:
             market = buy.market
             info = self.market_info[market]
-            if info['status'] != 'online':
+            if info['status'] != 'online' or info['trading_disabled']:
                 continue
                 # could probably use post_only in the order flags
             elif info['cancel_only'] or info['post_only']:
@@ -176,6 +179,9 @@ class PortfolioManager:
         """
         next_generation: t.List[PendingLimitBuy] = []  # Word to Bob
         for pending_buy in self.pending_limit_buys:
+            if self.market_info[pending_buy.market]['trading_disabled']:
+                next_generation.append(pending_buy)
+                continue
             order_id = pending_buy.order_id
             if pending_buy.created_at > self.tick_time:
                 # buy was created during this iteration, nothing to do
@@ -185,6 +191,7 @@ class PortfolioManager:
                 # buy was canceled externally before being filled
                 # candidate explanation is self-trade prevention
                 # we don't do anything about this
+                self.tracker.forget(order_id)
                 self.position_count -= 1
                 continue
             order = self.orders[order_id]
@@ -224,7 +231,9 @@ class PortfolioManager:
                 logger.debug(f"{active_position}")
                 self.active_positions.append(active_position)
             else:
-                raise ValueError(f"Unknown order status {status}")
+                logger.warning(f"Unknown status {status}.")
+                logger.debug(order)
+                next_generation.append(pending_buy)
         # RESET PENDING BUYS
         self.pending_limit_buys = next_generation
 
@@ -260,6 +269,9 @@ class PortfolioManager:
         next_generation: t.List[DesiredMarketSell] = []
         for sell in self.desired_market_sells:
             info = self.market_info[sell.market]
+            if info['trading_disabled']:
+                next_generation.append(sell)  # neanderthal retry
+                continue
             if info['status'] != 'online' or info['cancel_only']:
                 next_generation.append(sell)  # neanderthal retry
                 continue
@@ -303,6 +315,7 @@ class PortfolioManager:
                 next_generation.append(sell)
                 continue
             elif order_id not in self.orders:
+                self.tracker.forget(order_id)
                 desired_sell = DesiredMarketSell(market=sell.market,
                                                  size=sell.size,
                                                  previous_state=sell,
@@ -343,7 +356,8 @@ class PortfolioManager:
                     logger.debug(f"{desired_sell}")
                     self.desired_market_sells.append(desired_sell)
             else:
-                logger.debug(f"Unknown status: {status}")
+                logger.warning(f"Unknown status: {status}")
+                logger.debug(order)
                 next_generation.append(sell)
         self.pending_market_sells = next_generation
 
@@ -355,6 +369,9 @@ class PortfolioManager:
         for sell in self.desired_limit_sells:
             # TODO: Fork on max size limit reached
             market_info = self.market_info[sell.market]
+            if market_info['trading_disabled']:
+                next_generation.append(sell)
+                continue
             quote_increment = Decimal(market_info['quote_increment'])
             price = sell.price.quantize(quote_increment)
             post_only = market_info['post_only']
@@ -390,11 +407,13 @@ class PortfolioManager:
         next_generation: t.List[PendingLimitSell] = []
         for sell in self.pending_limit_sells:
             order_id = sell.order_id
+            trading_disabled = self.market_info[sell.market]
             if sell.created_at > self.tick_time:
                 # created during this generation, nothing to see here
                 next_generation.append(sell)
                 continue
             elif order_id not in self.orders:
+                self.tracker.forget(order_id)
                 # External cancellation of pending order
                 desired_sell = DesiredMarketSell(market=sell.market,
                                                  size=sell.size,
@@ -408,7 +427,7 @@ class PortfolioManager:
             if status in {'active', 'pending', 'open'}:
                 server_age = self.tick_time - sell.created_at
                 time_limit_expired = server_age > self.sell_age_limit
-                if time_limit_expired:
+                if time_limit_expired and not trading_disabled:
                     self.client.cancel_order(order_id)
                     cancellation = PendingCancelLimitSell(
                         market=sell.market,
@@ -452,7 +471,8 @@ class PortfolioManager:
                     logger.debug(f"{desired_sell}")
                     self.desired_market_sells.append(desired_sell)
             else:
-                logger.debug(f"Unknown status: {status}")
+                logger.warning(f"Unknown status: {status}")
+                logger.debug(order)
                 next_generation.append(sell)
                 continue
         self.pending_limit_sells = next_generation
@@ -539,14 +559,13 @@ class PortfolioManager:
             while state:
                 if isinstance(state, ActivePosition):
                     gain = (sell.price - state.price) * sell.size
-                    logger.info(f"Sold! {sell.market}: ${gain}")
+                    print(f"Sold! {sell.market}: ${gain}")
                     break
                 state = state.previous_state
             self.position_count -= 1
 
     def set_tick_variables(self) -> None:
-        usd_account = self.client.get_account(self.usd_account_id)
-        self.available_funds = Decimal(usd_account['available'])
+        self.set_available_funds()
         self.prices = self.price_indicator.compute().map(Decimal)
         self.scores = self.score_indicator.compute().map(Decimal)
         self.market_info = {product['id']: product for product in
@@ -554,9 +573,14 @@ class PortfolioManager:
         self.tick_time, self.orders = self.tracker.barrier_snapshot()
         send_message = getattr(self.client, '_send_message')
         fee_info = send_message('GET', '/fees')
-        self.fee = Decimal(fee_info['taker_fee'])
+        self.fee = Decimal(fee_info['taker_fee_rate'])
+
+    def set_available_funds(self):
+        usd_account = self.client.get_account(self.usd_account_id)
+        self.available_funds = Decimal(usd_account['available'])
 
     def shutdown(self) -> None:
+        logger.info(f"Shutting down...")
         self.client.cancel_all()
         for account in self.client.get_accounts():
             # TODO: Lots of potential here
@@ -569,17 +593,17 @@ class PortfolioManager:
                                                size=account['available'])
 
     def run(self) -> t.NoReturn:
-        last_tick = dateutil.parser.parse(self.client.get_time()['iso'])
+        last_tick = get_iso_time()
         while True:
             self.set_tick_variables()
             if not self.tick_time > last_tick:
                 # wait for order snapshot to catch up
                 # this should never happen with the synchronous order tracker
-                logger.info("backing off")
+                logger.warning("backing off")
                 continue
             self.cool_down.set_tick(self.tick_time)
             self.manage_positions()
-            last_tick = dateutil.parser.parse(self.client.get_time()['iso'])
+            last_tick = get_iso_time()
 
     def manage_positions(self):
         self.check_sold()
@@ -592,6 +616,8 @@ class PortfolioManager:
         self.check_cancel_buys()
         self.check_pending_buys()
         self.check_desired_buys()
+
+        self.set_available_funds()
         self.queue_buys()
 
 

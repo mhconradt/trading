@@ -1,10 +1,10 @@
+import typing as t
 from abc import ABC, abstractmethod
 from datetime import datetime
-import typing as t
-
-import dateutil.parser
 
 from cbpro import AuthenticatedClient
+
+from helper.coinbase import get_iso_time
 
 
 class OrderTracker(ABC):
@@ -39,19 +39,20 @@ class SyncCoinbaseOrderTracker(OrderTracker):
         self.watchlist.append(order_id)
 
     def barrier_snapshot(self) -> t.Tuple[datetime, dict]:
-        timestamp = dateutil.parser.parse(self.client.get_time()['iso'])
+        timestamp = get_iso_time()
         return timestamp, self.snapshot()
 
     def snapshot(self) -> dict:
         index = len(self.watchlist) - 1
         watched_items = set(self.watchlist)
         snapshot = {}
+        if not self.watchlist:
+            return {}
         for order in self.client.get_orders(status='all'):
             print(order['id'])
             for i in range(index, -1, -1):
                 watch = self.watchlist[i]
                 order_id = order['id']
-                print(f"{order_id} -> {watch}")
                 if watch == order_id:
                     index -= 1
                     snapshot[order_id] = order
@@ -68,4 +69,5 @@ class SyncCoinbaseOrderTracker(OrderTracker):
         return snapshot
 
     def forget(self, order_id: str) -> None:
-        self.watchlist.remove(order_id)
+        if order_id in self.watchlist:
+            self.watchlist.remove(order_id)
