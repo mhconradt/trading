@@ -22,7 +22,8 @@ class PositionState(ABC):
     def __str__(self) -> str:
         if self.previous_state:
             intrinsic = repr(self)
-            return f"{str(self.previous_state)} -> ({self.state_change}) -> {intrinsic}"
+            previous_state = str(self.previous_state)
+            return f"{previous_state} -> ({self.state_change}) -> {intrinsic}"
         else:
             return repr(self)
 

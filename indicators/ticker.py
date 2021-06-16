@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from influxdb_client import InfluxDBClient
-from pandas import DataFrame
+import pandas as pd
 
 
 class Ticker:
@@ -13,7 +13,7 @@ class Ticker:
         self.start = start
         self.stop = stop
 
-    def compute(self) -> DataFrame:
+    def compute(self) -> pd.Series:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'start': self.start,
@@ -28,8 +28,7 @@ class Ticker:
                 |> last()
                 |> yield(name: "price")
         """, data_frame_index=['market'], params=parameters)
-        aliases = {'_value': 'price', '_time': 'timestamp'}
-        return df[['_value', '_time']].rename(aliases, axis=1)
+        return df['_value'].rename('price')
 
 
 if __name__ == '__main__':

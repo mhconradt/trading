@@ -19,7 +19,6 @@ from brain.volatility_cooldown import VolatilityCoolDown
 from indicators import InstantIndicator
 
 
-# TODO: Limit # of orders (per product)
 # TODO: Rate limiting
 
 
@@ -64,6 +63,7 @@ class PortfolioManager:
 
         self.cool_down = VolatilityCoolDown(timedelta(minutes=5))
         self.next_position_id = 0
+        self.gains = Decimal('0')
 
     def compute_buy_weights(self, scores: Series,
                             spending_limit: Decimal) -> Series:
@@ -245,14 +245,13 @@ class PortfolioManager:
                 next_generation.append(position)
         self.active_positions = next_generation
 
-    def check_desired_market_sells(self, market_info: dict) -> None:
+    def check_desired_market_sells(self) -> None:
         """
         Place market sell orders for desired sells.
-        :param market_info:
         """
         next_generation: t.List[DesiredMarketSell] = []
         for sell in self.desired_market_sells:
-            info = market_info[sell.market]
+            info = self.market_info[sell.market]
             if info['status'] != 'online' or info['cancel_only']:
                 next_generation.append(sell)  # neanderthal retry
                 continue
@@ -566,7 +565,7 @@ class PortfolioManager:
         self.check_cancel_sells()
         self.check_pending_market_sells()
         self.check_pending_limit_sells()
-        self.check_desired_market_sells({})
+        self.check_desired_market_sells()
         self.check_desired_limit_sells()
         self.check_active_positions()
         self.check_cancel_buys()
