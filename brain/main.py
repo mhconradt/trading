@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
@@ -20,6 +21,9 @@ ADJUST_INTERVAL = 12
 STOP_LOSS_RATIO = Decimal('0.965')
 
 TAKE_PROFIT_RATIO = Decimal('1.01')
+
+logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
+                    level=logging.DEBUG)
 
 
 def liquidate(client: AuthenticatedClient):
@@ -44,8 +48,8 @@ def main() -> None:
                                    b64secret=coinbase_settings.SECRET,
                                    passphrase=coinbase_settings.PASSPHRASE,
                                    api_url=coinbase_settings.API_URL)
-    stop_loss = SimpleStopLoss(take_profit_ratio=Decimal('1.013'),
-                               stop_loss_ratio=Decimal('0.975'))
+    stop_loss = SimpleStopLoss(take_profit_ratio=TAKE_PROFIT_RATIO,
+                               stop_loss_ratio=STOP_LOSS_RATIO)
     cool_down = VolatilityCoolDown(timedelta(minutes=5))
     manager = PortfolioManager(coinbase, price_indicator=ticker,
                                score_indicator=moonshot, stop_loss=stop_loss,

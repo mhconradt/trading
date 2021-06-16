@@ -1,3 +1,4 @@
+import logging
 import typing as t
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -18,8 +19,8 @@ from brain.volatility_cooldown import VolatilityCoolDown
 from cbpro import AuthenticatedClient
 from indicators import InstantIndicator
 
-
 # TODO: Rate limiting
+logger = logging.getLogger(__name__)
 
 
 class PortfolioManager:
@@ -113,7 +114,7 @@ class PortfolioManager:
                                   market=market,
                                   previous_state=previous_state,
                                   state_change=f'buy target {weight:.2f}')
-            print(f"{buy}")
+            logger.debug(f"{buy}")
             self.desired_limit_buys.append(buy)
             self.position_count += 1
         return None
@@ -157,7 +158,7 @@ class PortfolioManager:
                                       created_at=created_at,
                                       previous_state=buy,
                                       state_change='order placed')
-            print(f"{pending}")
+            logger.debug(f"{pending}")
             self.pending_limit_buys.append(pending)
         # RESET DESIRED BUYS
         self.desired_limit_buys = []
@@ -199,7 +200,7 @@ class PortfolioManager:
                         previous_state=pending_buy,
                         state_change=f'age limit {self.buy_age_limit} expired'
                     )
-                    print(f"{cancel_buy}")
+                    logger.debug(f"{cancel_buy}")
                     self.pending_cancel_buys.append(cancel_buy)
                 else:
                     next_generation.append(pending_buy)
@@ -216,7 +217,7 @@ class PortfolioManager:
                                                  start=self.tick_time,
                                                  previous_state=pending_buy,
                                                  state_change='order filled')
-                print(f"{active_position}")
+                logger.debug(f"{active_position}")
                 self.active_positions.append(active_position)
             else:
                 raise ValueError(f"Unknown order status {status}")
@@ -241,7 +242,7 @@ class PortfolioManager:
                                         market=position.market,
                                         previous_state=position,
                                         state_change=state_change)
-                print(f"{sell}")
+                logger.debug(f"{sell}")
                 self.cool_down.sold(position.market)
                 self.desired_limit_sells.append(sell)
             else:
@@ -265,14 +266,14 @@ class PortfolioManager:
                                               market=sell.market,
                                               previous_state=sell,
                                               state_change=transition)
-                print(f"{limit_sell}")
+                logger.debug(f"{limit_sell}")
                 self.desired_limit_sells.append(limit_sell)
                 continue
             order = self.client.place_market_order(sell.market, side='sell',
                                                    size=sell.size)
             if 'id' not in order:
                 next_generation.append(sell)  # neanderthal retry
-                print(f"DEBUG: Place order error message {order}")
+                logger.debug(f"Place order error message {order}")
                 continue
             order_id = order['id']
             self.tracker.remember(order_id)
@@ -283,7 +284,7 @@ class PortfolioManager:
                                              created_at=created_at,
                                              previous_state=sell,
                                              state_change='order created')
-            print(f"{pending_sell}")
+            logger.debug(f"{pending_sell}")
             self.pending_market_sells.append(pending_sell)
         self.desired_market_sells = next_generation
 
@@ -302,7 +303,7 @@ class PortfolioManager:
                                                  size=sell.size,
                                                  previous_state=sell,
                                                  state_change='ext. cancelled')
-                print(f"{desired_sell}")
+                logger.debug(f"{desired_sell}")
                 self.desired_market_sells.append(desired_sell)
                 continue
             order = self.orders[order_id]
@@ -326,7 +327,7 @@ class PortfolioManager:
                                 price=executed_price, fees=fee,
                                 previous_state=sell,
                                 state_change=transition)
-                    print(f"{sold}")
+                    logger.debug(f"{sold}")
                     self.sells.append(sold)
                 if remainder:
                     self.position_count += 1
@@ -335,10 +336,10 @@ class PortfolioManager:
                                                      size=remainder,
                                                      previous_state=sell,
                                                      state_change=transition)
-                    print(desired_sell)
+                    logger.debug(f"{desired_sell}")
                     self.desired_market_sells.append(desired_sell)
             else:
-                print(f"Unknown status: {status}")
+                logger.debug(f"Unknown status: {status}")
                 next_generation.append(sell)
         self.pending_market_sells = next_generation
 
@@ -361,7 +362,7 @@ class PortfolioManager:
                                                   post_only=post_only)
             if 'id' not in order:
                 next_generation.append(sell)
-                print(f"DEBUG: Place order error message {order}")
+                logger.debug(f"Place order error message {order}")
                 continue
             order_id = order['id']
             self.tracker.remember(order_id)
@@ -372,7 +373,7 @@ class PortfolioManager:
                                             created_at=created_at,
                                             previous_state=sell,
                                             state_change='order placed')
-            print(f"{pending_sell}")
+            logger.debug(f"{pending_sell}")
             self.pending_limit_sells.append(pending_sell)
         self.desired_limit_sells = next_generation
 
@@ -395,7 +396,7 @@ class PortfolioManager:
                                                  size=sell.size,
                                                  previous_state=sell,
                                                  state_change='ext. cancel')
-                print(f"{desired_sell}")
+                logger.debug(f"{desired_sell}")
                 self.desired_market_sells.append(desired_sell)
                 continue
             order = self.orders[order_id]
@@ -413,7 +414,7 @@ class PortfolioManager:
                         previous_state=sell,
                         state_change=f'age limit {self.sell_age_limit} expired'
                     )
-                    print(f"{cancellation}")
+                    logger.debug(f"{cancellation}")
                     self.pending_cancel_sells.append(cancellation)
                 else:
                     next_generation.append(sell)
@@ -436,7 +437,7 @@ class PortfolioManager:
                                 previous_state=sell,
                                 state_change=state_change,
                                 )
-                    print(f"{sold}")
+                    logger.debug(f"{sold}")
                     self.sells.append(sold)
                 if remainder:
                     self.position_count += 1
@@ -444,10 +445,10 @@ class PortfolioManager:
                                                      size=remainder,
                                                      previous_state=sell,
                                                      state_change='ext cancel')
-                    print(f"{desired_sell}")
+                    logger.debug(f"{desired_sell}")
                     self.desired_market_sells.append(desired_sell)
             else:
-                print(f"Unknown status: {status}")
+                logger.debug(f"Unknown status: {status}")
                 next_generation.append(sell)
                 continue
         self.pending_limit_sells = next_generation
@@ -479,11 +480,11 @@ class PortfolioManager:
                                           start=self.tick_time,
                                           previous_state=cancellation,
                                           state_change=state_change)
-                print(f"{position}")
+                logger.debug(f"{position}")
                 self.active_positions.append(position)
             else:
-                print(order)
-                print(f"Unknown status {status}")
+                logger.debug(order)
+                logger.debug(f"Unknown status {status}")
                 next_generation.append(cancellation)
                 continue
         self.pending_cancel_buys = next_generation
@@ -503,7 +504,7 @@ class PortfolioManager:
                                           remainder, cancellation.market,
                                           previous_state=cancellation,
                                           state_change='partially filled')
-                    print(f"{buy}")
+                    logger.debug(f"{buy}")
                     self.desired_limit_buys.append(buy)
                     self.position_count += 1  # fork
                 if order is None or not filled_size:
@@ -516,7 +517,7 @@ class PortfolioManager:
                             market=cancellation.market,
                             previous_state=cancellation,
                             state_change=state_change)
-                print(f"{sell}")
+                logger.debug(f"{sell}")
                 self.sells.append(sell)
                 continue
             elif order['status'] in {'active', 'pending', 'open'}:
@@ -534,7 +535,7 @@ class PortfolioManager:
             while state:
                 if isinstance(state, ActivePosition):
                     gain = (sell.price - state.price) * sell.size
-                    print(f"{sell.market}: ${gain}")
+                    logger.info(f"Sold! {sell.market}: ${gain}")
                     break
                 state = state.previous_state
             self.position_count -= 1
@@ -570,6 +571,7 @@ class PortfolioManager:
             if not self.tick_time > last_tick:
                 # wait for order snapshot to catch up
                 # this should never happen with the synchronous order tracker
+                logger.info("backing off")
                 continue
             self.cool_down.set_tick(self.tick_time)
             self.manage_positions()
