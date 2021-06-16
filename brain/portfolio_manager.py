@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import dateutil.parser
 import numpy as np
+from cbpro import AuthenticatedClient
 from pandas import Series
 
 from brain.order_tracker import SyncCoinbaseOrderTracker
@@ -16,7 +17,6 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             RootState)
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
-from cbpro import AuthenticatedClient
 from indicators import InstantIndicator
 
 # TODO: Rate limiting
@@ -27,7 +27,8 @@ class PortfolioManager:
     def __init__(self, client: AuthenticatedClient,
                  price_indicator: InstantIndicator,
                  score_indicator: InstantIndicator, stop_loss: SimpleStopLoss,
-                 cool_down: VolatilityCoolDown):
+                 cool_down: VolatilityCoolDown,
+                 market_blacklist: t.Container[str]):
         self.client = client
         self.price_indicator = price_indicator
         self.score_indicator = score_indicator
@@ -67,6 +68,7 @@ class PortfolioManager:
         self.stop_loss = stop_loss
         self.next_position_id = 0
         self.gains = Decimal('0')
+        self.blacklist = market_blacklist
 
     def compute_buy_weights(self, scores: Series,
                             spending_limit: Decimal) -> Series:
@@ -76,7 +78,9 @@ class PortfolioManager:
         if self.position_count == self.max_positions:
             return nil_weights
         cooling_down = filter(self.cool_down.cooling_down, scores.index)
-        scores = scores.loc[scores.index.difference(cooling_down)]
+        allowed = scores.index.difference(cooling_down)
+        allowed = allowed.difference(self.blacklist)
+        scores = scores.loc[allowed]
         positive_scores = scores[scores.notna() & scores.gt(0.)]
         ranked_scores = positive_scores.sort_values(ascending=False)
         cumulative_normalized_scores = ranked_scores / ranked_scores.cumsum()

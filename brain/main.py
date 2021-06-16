@@ -31,7 +31,8 @@ def main() -> None:
     cool_down = VolatilityCoolDown(timedelta(minutes=5))
     manager = PortfolioManager(coinbase, price_indicator=ticker,
                                score_indicator=moonshot, stop_loss=stop_loss,
-                               cool_down=cool_down)
+                               cool_down=cool_down,
+                               market_blacklist={'USDT-USD'})
     try:
         manager.run()
     finally:

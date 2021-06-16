@@ -1,4 +1,4 @@
-FROM python:3.9
+FROM python:3.8
 
 WORKDIR /app/
 
@@ -8,4 +8,4 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-CMD ["main.py"]
+CMD ["brain/main.py"]
