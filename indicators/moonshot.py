@@ -1,7 +1,7 @@
 from datetime import timedelta
 
-from influxdb_client import InfluxDBClient
 import pandas as pd
+from influxdb_client import InfluxDBClient
 
 from .momentum import Momentum
 
@@ -24,12 +24,11 @@ class MoonShot:
         this_mom15 = mom_15.iloc[-1]
         last_mom5 = mom_5.iloc[-2]
         last_mom15 = mom_15.iloc[-2]
-        # either this...
-        positive = (this_mom5 > 0.) & (last_mom5 > 0.) & (this_mom15 > 0.) & (
-                last_mom15 > 0.)
-        increasing = (this_mom5 > 0.) & (this_mom15 > 0.)
+        mom5_increasing = (this_mom5 > 0.) & (last_mom5 > 0.)
+        mom15_increasing = (this_mom15 > 0.) & (last_mom15 > 0.)
+        increasing = mom5_increasing & mom15_increasing
         accelerating = (this_mom5 > last_mom5) & (this_mom15 > last_mom15)
-        buy_mask = positive & increasing & accelerating
+        buy_mask = increasing & accelerating
         mom5_diff = this_mom5 - last_mom5
         mom15_diff = this_mom15 - last_mom15
         scores = buy_mask * (mom5_diff + mom15_diff)
