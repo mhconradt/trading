@@ -1,15 +1,15 @@
 import json
-import time
 import sys
+import time
 import typing as t
 
-from influxdb_client import InfluxDBClient
 import cbpro
-from helper.coinbase import get_usd_product_ids
+from influxdb_client import InfluxDBClient
 
-from settings import influx_db as influx_db_settings
+from helper.coinbase import get_usd_product_ids
 from realtime_ingest.sink import RecordSink, BatchingSink, InfluxDBTradeSink
 from realtime_ingest.tasks import replay
+from settings import influx_db as influx_db_settings
 
 EXCHANGE_NAME = 'coinbasepro'
 
@@ -90,7 +90,7 @@ def main() -> None:
                              bucket="trades")
     sink = BatchingSink(32, sink)
     # Characteristics for storing watermarks: high availability only
-    # If watermarks are zero, eventually downloads the DB in O(1) space and O(n) time.
+    # If watermarks are zero, eventually downloads the DB.
     with open('watermarks.json', 'r') as f:
         watermarks = json.load(f)
     while True:
@@ -102,8 +102,6 @@ def main() -> None:
                 time.sleep(1)
         except KeyboardInterrupt:
             break
-        except Exception:
-            pass
         finally:
             # catch up from last state
             sink.flush()
