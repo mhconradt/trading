@@ -1,21 +1,20 @@
-from collections import deque
-from datetime import datetime, timedelta
-import dateutil.parser
-from decimal import Decimal
 import typing as t
+from datetime import datetime, timedelta
+from decimal import Decimal
 
-from cbpro import AuthenticatedClient
+import dateutil.parser
 import numpy as np
 from pandas import Series
 
+from brain.order_tracker import SyncCoinbaseOrderTracker
 from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             DesiredLimitSell, PendingLimitSell, Sold,
                             PendingCancelBuy,
                             PendingCancelLimitSell, DesiredMarketSell,
                             PendingMarketSell,
                             RootState)
-from brain.order_tracker import SyncCoinbaseOrderTracker
 from brain.volatility_cooldown import VolatilityCoolDown
+from cbpro import AuthenticatedClient
 from indicators import InstantIndicator
 
 
@@ -50,8 +49,8 @@ class PortfolioManager:
         self.fee: t.Optional[Decimal] = None
 
         # STATES
-        self.desired_limit_buys: deque[DesiredLimitBuy] = deque()
-        self.pending_limit_buys: deque[PendingLimitBuy] = deque()
+        self.desired_limit_buys: t.List[DesiredLimitBuy] = []
+        self.pending_limit_buys: t.List[PendingLimitBuy] = []
         self.pending_cancel_buys: t.List[PendingCancelBuy] = []
         self.active_positions: t.List[ActivePosition] = []
         self.desired_limit_sells: t.List[DesiredLimitSell] = []
@@ -59,7 +58,7 @@ class PortfolioManager:
         self.pending_limit_sells: t.List[PendingLimitSell] = []
         self.pending_market_sells: t.List[PendingMarketSell] = []
         self.pending_cancel_sells: t.List[PendingCancelLimitSell] = []
-        self.sells: deque[Sold] = deque()
+        self.sells: t.List[Sold] = []
 
         self.cool_down = VolatilityCoolDown(timedelta(minutes=5))
         self.next_position_id = 0
@@ -548,6 +547,18 @@ class PortfolioManager:
         fee_info = send_message('GET', '/fees')
         self.fee = Decimal(fee_info['taker_fee'])
 
+    def shutdown(self) -> None:
+        self.client.cancel_all()
+        for account in self.client.get_accounts():
+            # TODO: Lots of potential here
+            if account['currency'] == 'USD':
+                continue
+            product = f'{account["currency"]}-USD'
+            if Decimal(account['available']):
+                self.client.place_market_order(product,
+                                               side='sell',
+                                               size=account['available'])
+
     def run(self) -> t.NoReturn:
         last_tick = dateutil.parser.parse(self.client.get_time()['iso'])
         while True:
@@ -572,3 +583,6 @@ class PortfolioManager:
         self.check_pending_buys()
         self.check_desired_buys()
         self.queue_buys()
+
+
+__all__ = ['PortfolioManager']
