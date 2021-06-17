@@ -1,7 +1,10 @@
+import typing as t
 from datetime import timedelta
 
+import pandas as pd
 from influxdb_client import InfluxDBClient
-from pandas import DataFrame
+
+from exceptions import StaleDataException
 
 
 class CandleSticks:
@@ -13,7 +16,7 @@ class CandleSticks:
         self.start = start
         self.stop = stop
 
-    def compute(self) -> DataFrame:
+    def compute(self) -> t.Union[pd.DataFrame]:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
@@ -29,6 +32,10 @@ class CandleSticks:
             |> yield()
         """, data_frame_index=['market', '_time'],
                                         params=parameters)
+        if not len(df):
+            raise StaleDataException(
+                f"No candles between {self.start} and {self.stop}"
+            )
         return df[['open', 'high', 'low', 'close', 'volume']]
 
 

@@ -26,9 +26,6 @@ from indicators import InstantIndicator
 logger = logging.getLogger(__name__)
 
 
-# Problem: Message may or may not have been received
-
-
 class PortfolioManager:
     def __init__(self, client: AuthenticatedClient,
                  price_indicator: InstantIndicator,
@@ -551,13 +548,14 @@ class PortfolioManager:
                 remainder = cancellation.size - filled_size
                 if remainder:
                     buy = DesiredMarketSell(
-                        remainder, cancellation.market,
+                        size=remainder, market=cancellation.market,
                         previous_state=cancellation,
                         state_change='partially filled')
                     logger.debug(f"{buy}")
                     self.desired_market_sells.append(buy)
                     self.position_count += 1  # fork
                 if order is None or not filled_size:
+                    self.position_count -= 1
                     continue
                 executed_price = e_v / filled_size
                 filled = filled_size == cancellation.size
@@ -569,7 +567,6 @@ class PortfolioManager:
                             state_change=state_change)
                 logger.debug(f"{sell}")
                 self.sells.append(sell)
-                continue
             elif order['status'] in {'active', 'pending', 'open'}:
                 next_generation.append(cancellation)
                 continue
@@ -615,13 +612,16 @@ class PortfolioManager:
         self.client.cancel_all()
         for account in self.client.get_accounts():
             # TODO: Lots of potential here
-            if account['currency'] == 'USD':
+            currency = account['currency']
+            if currency == 'USD':
                 continue
             product = f'{account["currency"]}-USD'
-            if Decimal(account['available']):
+            available = account['available']
+            if Decimal(available):
                 self.client.place_market_order(product,
                                                side='sell',
-                                               size=account['available'])
+                                               size=available)
+                logger.info(f"Placed market sell for {available} {currency}")
 
     def run(self) -> t.NoReturn:
         last_tick = get_server_time()

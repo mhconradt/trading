@@ -1,7 +1,10 @@
+import typing as t
 from datetime import timedelta
 
+import pandas as pd
 from influxdb_client import InfluxDBClient
-from pandas import DataFrame, Series
+
+from exceptions import StaleDataException
 
 
 class Momentum:
@@ -13,7 +16,7 @@ class Momentum:
         self.start = start
         self.stop = stop
 
-    def compute(self) -> Series:
+    def compute(self) -> t.Union[pd.Series]:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
@@ -38,6 +41,10 @@ class Momentum:
                 }))
             |> yield()
         """, data_frame_index=['market', '_time'], params=parameters)
+        if not len(df):
+            raise StaleDataException(
+                f"No momentum between {self.start} and {self.stop}"
+            )
         return df.momentum.unstack(0)
 
 

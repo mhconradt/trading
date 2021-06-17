@@ -1,7 +1,10 @@
+import typing as t
 from datetime import timedelta
 
-from influxdb_client import InfluxDBClient
 import pandas as pd
+from influxdb_client import InfluxDBClient
+
+from exceptions import StaleDataException
 
 
 class Ticker:
@@ -13,7 +16,7 @@ class Ticker:
         self.start = start
         self.stop = stop
 
-    def compute(self) -> pd.Series:
+    def compute(self) -> t.Union[pd.Series]:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'start': self.start,
@@ -28,6 +31,10 @@ class Ticker:
                 |> last()
                 |> yield(name: "price")
         """, data_frame_index=['market'], params=parameters)
+        if not len(df):
+            raise StaleDataException(
+                f"No prices between {self.start} and {self.stop}"
+            )
         return df['_value'].rename('price')
 
 

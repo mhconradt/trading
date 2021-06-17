@@ -1,0 +1,2 @@
+class StaleDataException(BaseException):
+    pass

@@ -8,4 +8,4 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-CMD ["brain/main.py"]
+CMD ["portfolios/pessimistic_moonshot.py"]

@@ -7,7 +7,7 @@ from influxdb_client import InfluxDBClient
 from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
-from indicators import Ticker, MoonShot
+from indicators import Ticker, PessimisticMoonShot
 from settings import influx_db as influx_db_settings, \
     coinbase as coinbase_settings, portfolio as portfolio_settings
 
@@ -20,7 +20,7 @@ def main() -> None:
                             influx_db_settings.INFLUX_TOKEN,
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
-    moonshot = MoonShot(client, portfolio_settings.EXCHANGE)
+    moonshot = PessimisticMoonShot(client, portfolio_settings.EXCHANGE)
     ticker = Ticker(client, portfolio_settings.EXCHANGE, timedelta(minutes=-1))
     coinbase = AuthenticatedClient(key=coinbase_settings.API_KEY,
                                    b64secret=coinbase_settings.SECRET,
