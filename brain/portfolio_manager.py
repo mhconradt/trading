@@ -26,6 +26,9 @@ from indicators import InstantIndicator
 logger = logging.getLogger(__name__)
 
 
+# Problem: Message may or may not have been received
+
+
 class PortfolioManager:
     def __init__(self, client: AuthenticatedClient,
                  price_indicator: InstantIndicator,
@@ -135,7 +138,7 @@ class PortfolioManager:
                                   state_change=f'buy target {weight:.2f}')
             self.allocations += allocation
             logger.debug(f"{buy}")
-            self.desired_limit_buys.append(buy)
+            self.desired_limit_buys.appendleft(buy)
             self.position_count += 1
         return None
 
@@ -148,9 +151,7 @@ class PortfolioManager:
 
         Percentage-of-volume trading at some point?
         """
-        next_generation: deque[DesiredLimitBuy] = deque()
         for buy in self.desired_limit_buys:
-            # TODO: Retry network errors
             market = buy.market
             info = self.market_info[market]
             if info['status'] != 'online' or info['trading_disabled']:
@@ -165,15 +166,11 @@ class PortfolioManager:
                 continue
             max_size = Decimal(info['base_max_size'])
             size = min(size, max_size)
-            try:
-                order = self.client.place_limit_order(market, side='buy',
-                                                      price=str(price),
-                                                      size=str(size),
-                                                      time_in_force='GTC',
-                                                      stp='cn')
-            except requests.RequestException:
-                next_generation.append(buy)
-                continue
+            order = self.client.place_limit_order(market, side='buy',
+                                                  price=str(price),
+                                                  size=str(size),
+                                                  time_in_force='GTC',
+                                                  stp='cn')
             self.allocations -= buy.allocation  # we tried
             if 'id' not in order:
                 continue  # This means there was a problem with the order
@@ -188,7 +185,7 @@ class PortfolioManager:
             logger.debug(f"{pending}")
             self.pending_limit_buys.append(pending)
         # RESET DESIRED BUYS
-        self.desired_limit_buys = next_generation
+        self.desired_limit_buys = deque()
 
     def check_pending_buys(self) -> None:
         """
@@ -199,7 +196,6 @@ class PortfolioManager:
         """
         next_generation: t.List[PendingLimitBuy] = []  # Word to Bob
         for pending_buy in self.pending_limit_buys:
-            # TODO: Retry
             if self.market_info[pending_buy.market]['trading_disabled']:
                 next_generation.append(pending_buy)
                 continue
@@ -222,7 +218,11 @@ class PortfolioManager:
                 server_age = pending_buy.created_at - self.tick_time
                 time_limit_expired = server_age > self.buy_age_limit
                 if time_limit_expired:
-                    self.client.cancel_order(order_id)
+                    try:
+                        self.client.cancel_order(order_id)
+                    except requests.RequestException:
+                        next_generation.append(pending_buy)
+                        continue
                     cancel_buy = PendingCancelBuy(
                         market=pending_buy.market,
                         price=pending_buy.price,
@@ -289,7 +289,6 @@ class PortfolioManager:
         """
         next_generation: t.List[DesiredMarketSell] = []
         for sell in self.desired_market_sells:
-            # TODO: Retry
             info = self.market_info[sell.market]
             if info['trading_disabled']:
                 next_generation.append(sell)  # neanderthal retry
@@ -307,7 +306,8 @@ class PortfolioManager:
                 logger.debug(f"{limit_sell}")
                 self.desired_limit_sells.append(limit_sell)
                 continue
-            order = self.client.place_market_order(sell.market, side='sell',
+            order = self.client.place_market_order(sell.market,
+                                                   side='sell',
                                                    size=sell.size)
             if 'id' not in order:
                 next_generation.append(sell)  # neanderthal retry
@@ -390,7 +390,6 @@ class PortfolioManager:
         next_generation: t.List[DesiredLimitSell] = []
         for sell in self.desired_limit_sells:
             # TODO: Fork on max size limit reached
-            # TODO: Retry
             market_info = self.market_info[sell.market]
             if market_info['trading_disabled']:
                 next_generation.append(sell)
@@ -429,7 +428,6 @@ class PortfolioManager:
         """
         next_generation: t.List[PendingLimitSell] = []
         for sell in self.pending_limit_sells:
-            # TODO: Retry
             order_id = sell.order_id
             trading_disabled = self.market_info[sell.market]
             if sell.created_at > self.tick_time:
@@ -452,7 +450,11 @@ class PortfolioManager:
                 server_age = self.tick_time - sell.created_at
                 time_limit_expired = server_age > self.sell_age_limit
                 if time_limit_expired and not trading_disabled:
-                    self.client.cancel_order(order_id)
+                    try:
+                        self.client.cancel_order(order_id)
+                    except requests.RequestException:
+                        next_generation.append(sell)
+                        continue
                     cancellation = PendingCancelLimitSell(
                         market=sell.market,
                         size=sell.size,
@@ -548,12 +550,12 @@ class PortfolioManager:
                 filled_size = Decimal(order['filled_size'] if order else '0')
                 remainder = cancellation.size - filled_size
                 if remainder:
-                    buy = DesiredLimitBuy(self.prices.loc[cancellation.market],
-                                          remainder, cancellation.market,
-                                          previous_state=cancellation,
-                                          state_change='partially filled')
+                    buy = DesiredMarketSell(
+                        remainder, cancellation.market,
+                        previous_state=cancellation,
+                        state_change='partially filled')
                     logger.debug(f"{buy}")
-                    self.desired_limit_buys.append(buy)
+                    self.desired_market_sells.append(buy)
                     self.position_count += 1  # fork
                 if order is None or not filled_size:
                     continue
