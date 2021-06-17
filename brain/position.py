@@ -45,6 +45,8 @@ class DesiredLimitBuy(PositionState):
     size: Decimal
     market: str
 
+    allocation: Decimal
+
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 

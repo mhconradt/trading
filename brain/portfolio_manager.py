@@ -1,10 +1,12 @@
 import logging
 import typing as t
+from collections import deque
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 import dateutil.parser
 import numpy as np
+import requests
 from cbpro import AuthenticatedClient
 from pandas import Series
 
@@ -17,7 +19,7 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             RootState)
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
-from helper.coinbase import get_iso_time
+from helper.coinbase import get_server_time
 from indicators import InstantIndicator
 
 # TODO: Rate limiting
@@ -37,8 +39,11 @@ class PortfolioManager:
         self.usd_account_id = [account['id'] for account in accounts if
                                account['currency'] == 'USD'][0]
         self.tracker = SyncCoinbaseOrderTracker(client)
+        # a buy is allocated only until it receives a server response
+        self.allocations = Decimal('0')
+        # avoid congesting system with dozens of tiny positions
         self.min_position_size = Decimal('10')
-        self.max_positions = 10_000
+        self.max_positions = 100
         self.position_count = 0
 
         self.buy_age_limit = timedelta(minutes=1)
@@ -47,14 +52,14 @@ class PortfolioManager:
         # TICK VARIABLES
         self.tick_time: t.Optional[datetime] = None
         self.orders: t.Optional[t.Dict[str, dict]] = None
-        self.available_funds: t.Optional[Decimal] = None
+        self.portfolio_available_funds: t.Optional[Decimal] = None
         self.prices: t.Optional[Series] = None
         self.scores: t.Optional[Series] = None
         self.market_info: t.Optional[t.Dict[str, dict]] = None
         self.fee: t.Optional[Decimal] = None
 
         # STATES
-        self.desired_limit_buys: t.List[DesiredLimitBuy] = []
+        self.desired_limit_buys: deque[DesiredLimitBuy] = deque()
         self.pending_limit_buys: t.List[PendingLimitBuy] = []
         self.pending_cancel_buys: t.List[PendingCancelBuy] = []
         self.active_positions: t.List[ActivePosition] = []
@@ -70,6 +75,10 @@ class PortfolioManager:
         self.next_position_id = 0
         self.gains = Decimal('0')
         self.blacklist = market_blacklist
+
+    @property
+    def budget(self) -> Decimal:
+        return self.portfolio_available_funds - self.allocations
 
     def compute_buy_weights(self, scores: Series,
                             spending_limit: Decimal) -> Series:
@@ -107,20 +116,24 @@ class PortfolioManager:
         Don't queue if would put market above market_percentage_limit.
         Don't queue if would violate volatility cooldown.
         """
-        spending_limit = self.available_funds / (Decimal('1') + self.fee)
+        starting_budget = self.budget  # this computed property changes in loop
+        spending_limit = starting_budget / (Decimal('1') + self.fee)
         weights = self.compute_buy_weights(self.scores, spending_limit)
-        for market, weight in weights.iteritems():
+        decimal_weights = weights.map(Decimal)
+        for market, weight in decimal_weights.iteritems():
             assert isinstance(market, str)
-            assert isinstance(weight, Decimal)  # TODO: Remove this if it works
             price = self.prices[market]
             size = weight * spending_limit / price
             self.next_position_id += 1
+            allocation = weight * starting_budget
             previous_state = RootState(number=self.next_position_id)
             buy = DesiredLimitBuy(price=price,
                                   size=size,
                                   market=market,
+                                  allocation=allocation,
                                   previous_state=previous_state,
                                   state_change=f'buy target {weight:.2f}')
+            self.allocations += allocation
             logger.debug(f"{buy}")
             self.desired_limit_buys.append(buy)
             self.position_count += 1
@@ -135,7 +148,9 @@ class PortfolioManager:
 
         Percentage-of-volume trading at some point?
         """
+        next_generation: deque[DesiredLimitBuy] = deque()
         for buy in self.desired_limit_buys:
+            # TODO: Retry network errors
             market = buy.market
             info = self.market_info[market]
             if info['status'] != 'online' or info['trading_disabled']:
@@ -150,13 +165,18 @@ class PortfolioManager:
                 continue
             max_size = Decimal(info['base_max_size'])
             size = min(size, max_size)
-            order = self.client.place_limit_order(market, side='buy',
-                                                  price=str(price),
-                                                  size=str(size),
-                                                  time_in_force='GTC',
-                                                  stp='cn')
+            try:
+                order = self.client.place_limit_order(market, side='buy',
+                                                      price=str(price),
+                                                      size=str(size),
+                                                      time_in_force='GTC',
+                                                      stp='cn')
+            except requests.RequestException:
+                next_generation.append(buy)
+                continue
+            self.allocations -= buy.allocation  # we tried
             if 'id' not in order:
-                continue  # Handle this error
+                continue  # This means there was a problem with the order
             created_at = dateutil.parser.parse(order['created_at'])
             order_id = order['id']
             self.tracker.remember(order_id)
@@ -168,7 +188,7 @@ class PortfolioManager:
             logger.debug(f"{pending}")
             self.pending_limit_buys.append(pending)
         # RESET DESIRED BUYS
-        self.desired_limit_buys = []
+        self.desired_limit_buys = next_generation
 
     def check_pending_buys(self) -> None:
         """
@@ -179,6 +199,7 @@ class PortfolioManager:
         """
         next_generation: t.List[PendingLimitBuy] = []  # Word to Bob
         for pending_buy in self.pending_limit_buys:
+            # TODO: Retry
             if self.market_info[pending_buy.market]['trading_disabled']:
                 next_generation.append(pending_buy)
                 continue
@@ -268,6 +289,7 @@ class PortfolioManager:
         """
         next_generation: t.List[DesiredMarketSell] = []
         for sell in self.desired_market_sells:
+            # TODO: Retry
             info = self.market_info[sell.market]
             if info['trading_disabled']:
                 next_generation.append(sell)  # neanderthal retry
@@ -368,6 +390,7 @@ class PortfolioManager:
         next_generation: t.List[DesiredLimitSell] = []
         for sell in self.desired_limit_sells:
             # TODO: Fork on max size limit reached
+            # TODO: Retry
             market_info = self.market_info[sell.market]
             if market_info['trading_disabled']:
                 next_generation.append(sell)
@@ -406,6 +429,7 @@ class PortfolioManager:
         """
         next_generation: t.List[PendingLimitSell] = []
         for sell in self.pending_limit_sells:
+            # TODO: Retry
             order_id = sell.order_id
             trading_disabled = self.market_info[sell.market]
             if sell.created_at > self.tick_time:
@@ -564,8 +588,11 @@ class PortfolioManager:
                 state = state.previous_state
             self.position_count -= 1
 
+    from retry import retry
+
+    @retry(requests.RequestException, tries=5, delay=15)
     def set_tick_variables(self) -> None:
-        self.set_available_funds()
+        self.set_portfolio_available_funds()
         self.prices = self.price_indicator.compute().map(Decimal)
         self.scores = self.score_indicator.compute().map(Decimal)
         self.market_info = {product['id']: product for product in
@@ -575,10 +602,12 @@ class PortfolioManager:
         fee_info = send_message('GET', '/fees')
         self.fee = Decimal(fee_info['taker_fee_rate'])
 
-    def set_available_funds(self):
+    @retry(requests.RequestException, tries=5, delay=15)
+    def set_portfolio_available_funds(self):
         usd_account = self.client.get_account(self.usd_account_id)
-        self.available_funds = Decimal(usd_account['available'])
+        self.portfolio_available_funds = Decimal(usd_account['available'])
 
+    @retry(requests.RequestException, tries=5, delay=15)
     def shutdown(self) -> None:
         logger.info(f"Shutting down...")
         self.client.cancel_all()
@@ -593,7 +622,7 @@ class PortfolioManager:
                                                size=account['available'])
 
     def run(self) -> t.NoReturn:
-        last_tick = get_iso_time()
+        last_tick = get_server_time()
         while True:
             self.set_tick_variables()
             if not self.tick_time > last_tick:
@@ -603,7 +632,7 @@ class PortfolioManager:
                 continue
             self.cool_down.set_tick(self.tick_time)
             self.manage_positions()
-            last_tick = get_iso_time()
+            last_tick = get_server_time()
 
     def manage_positions(self):
         self.check_sold()
@@ -617,7 +646,7 @@ class PortfolioManager:
         self.check_pending_buys()
         self.check_desired_buys()
 
-        self.set_available_funds()
+        self.set_portfolio_available_funds()
         self.queue_buys()
 
 

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from cbpro import AuthenticatedClient
 
-from helper.coinbase import get_iso_time
+from helper.coinbase import get_server_time
 
 
 class OrderTracker(ABC):
@@ -39,7 +39,7 @@ class SyncCoinbaseOrderTracker(OrderTracker):
         self.watchlist.append(order_id)
 
     def barrier_snapshot(self) -> t.Tuple[datetime, dict]:
-        timestamp = get_iso_time()
+        timestamp = get_server_time()
         return timestamp, self.snapshot()
 
     def snapshot(self) -> dict:

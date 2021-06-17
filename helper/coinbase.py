@@ -4,6 +4,8 @@ from datetime import datetime
 
 import cbpro
 import dateutil.parser
+import requests
+from retry import retry
 
 
 def get_usd_products() -> t.List[dict]:
@@ -17,7 +19,8 @@ def get_usd_product_ids() -> t.List[str]:
     return [product['id'] for product in get_usd_products()]
 
 
-def get_iso_time() -> datetime:
+@retry(requests.RequestException, tries=2, delay=15)
+def get_server_time() -> datetime:
     cb_client = cbpro.PublicClient()
     while True:
         try:
