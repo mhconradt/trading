@@ -103,8 +103,10 @@ class PortfolioManager:
         limit = min(min_position_size_limit, position_count_limit)
         if not limit:
             return nil_weights
-        final_scores = ranked_scores.iloc[:limit]
-        return final_scores / final_scores.sum()
+        final_scores = cumulative_normalized_scores.iloc[:limit]
+        weights = final_scores / final_scores.sum()
+        logger.debug(weights)
+        return weights
 
     def queue_buys(self) -> None:
         """
@@ -168,8 +170,10 @@ class PortfolioManager:
                                                   size=str(size),
                                                   time_in_force='GTC',
                                                   stp='cn')
+            self.cool_down.bought(market)
             self.allocations -= buy.allocation  # we tried
             if 'id' not in order:
+                logger.warning(order)
                 continue  # This means there was a problem with the order
             created_at = dateutil.parser.parse(order['created_at'])
             order_id = order['id']
@@ -237,7 +241,7 @@ class PortfolioManager:
                 self.tracker.forget(order_id)
                 size = Decimal(order['filled_size'])
                 price = Decimal(order['executed_value']) / size
-                fee = Decimal(order['fee'])
+                fee = Decimal(order['fill_fees'])
                 # place stop loss order
                 # place take profit order
                 # accounting for orders
@@ -263,6 +267,9 @@ class PortfolioManager:
         """
         next_generation: t.List[ActivePosition] = []
         for position in self.active_positions:
+            if position.market not in self.prices:
+                next_generation.append(position)
+                continue
             price = self.prices[position.market]
             price_paid = position.price
             stop_loss = self.stop_loss.trigger_stop_loss(price, price_paid)
@@ -295,6 +302,9 @@ class PortfolioManager:
                 continue
             elif info['post_only'] or info['limit_only']:
                 transition = 'post only' if info['post_only'] else 'limit only'
+                if sell.market not in self.prices:
+                    next_generation.append(sell)  # neanderthal retry
+                    continue
                 limit_sell = DesiredLimitSell(price=self.prices[sell.market],
                                               size=sell.size,
                                               market=sell.market,

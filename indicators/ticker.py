@@ -8,7 +8,7 @@ from exceptions import StaleDataException
 
 
 class Ticker:
-    def __init__(self, db: InfluxDBClient, exchange: str = 'coinbasepro',
+    def __init__(self, db: InfluxDBClient, exchange: str,
                  start: timedelta = timedelta(minutes=-1),
                  stop: timedelta = timedelta(0)):
         self.exchange = exchange
@@ -48,7 +48,7 @@ if __name__ == '__main__':
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG)
 
-    ticker = Ticker(_influx, start=timedelta(days=-1))
+    ticker = Ticker(_influx, 'coinbasepro', start=timedelta(days=-1))
     while True:
         tickers = ticker.compute()
         print(tickers)

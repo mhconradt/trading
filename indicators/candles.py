@@ -8,7 +8,8 @@ from exceptions import StaleDataException
 
 
 class CandleSticks:
-    def __init__(self, db: InfluxDBClient, exchange, frequency, start,
+    def __init__(self, db: InfluxDBClient, exchange: str, frequency: timedelta,
+                 start: timedelta,
                  stop=timedelta(0)):
         self.db = db
         self.frequency = frequency

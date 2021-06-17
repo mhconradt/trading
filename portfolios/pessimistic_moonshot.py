@@ -20,19 +20,22 @@ def main() -> None:
                             influx_db_settings.INFLUX_TOKEN,
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
-    moonshot = PessimisticMoonShot(client, portfolio_settings.EXCHANGE)
-    ticker = Ticker(client, portfolio_settings.EXCHANGE, timedelta(minutes=-1))
+    moonshot = PessimisticMoonShot(client, portfolio_settings.EXCHANGE,
+                                   max_lag=timedelta(seconds=15),
+                                   downturn_window=timedelta(hours=1))
+    ticker = Ticker(client, portfolio_settings.EXCHANGE,
+                    start=timedelta(minutes=-5))
     coinbase = AuthenticatedClient(key=coinbase_settings.API_KEY,
                                    b64secret=coinbase_settings.SECRET,
                                    passphrase=coinbase_settings.PASSPHRASE,
                                    api_url=coinbase_settings.API_URL)
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
-    cool_down = VolatilityCoolDown(timedelta(minutes=5))
+    cool_down = VolatilityCoolDown(period=timedelta(minutes=5))
     manager = PortfolioManager(coinbase, price_indicator=ticker,
                                score_indicator=moonshot, stop_loss=stop_loss,
                                cool_down=cool_down,
-                               market_blacklist={'USDT-USD'})
+                               market_blacklist={'USDT-USD', 'DAI-USD'})
     try:
         manager.run()
     finally:
