@@ -22,7 +22,7 @@ def main() -> None:
                             org=influx_db_settings.INFLUX_ORG)
     moonshot = PessimisticMoonShot(client, portfolio_settings.EXCHANGE,
                                    max_lag=timedelta(seconds=15),
-                                   downturn_window=timedelta(hours=1))
+                                   downturn_window=timedelta(hours=6))
     ticker = Ticker(client, portfolio_settings.EXCHANGE,
                     start=timedelta(minutes=-5))
     coinbase = AuthenticatedClient(key=coinbase_settings.API_KEY,

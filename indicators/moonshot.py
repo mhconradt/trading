@@ -31,7 +31,9 @@ class MoonShot:
         this_mom15 = mom_15.iloc[-1]
         last_mom5 = mom_5.iloc[-2]
         last_mom15 = mom_15.iloc[-2]
-        mom_positive = (this_mom5 > 0.) & (this_mom15 > 0.)
+        mom5_positive = (this_mom5 > 0.) & (last_mom5 > 0.)
+        mom15_positive = (this_mom15 > 0.) & (last_mom15 > 0.)
+        mom_positive = mom5_positive & mom15_positive
         mom_increasing = (this_mom5 > last_mom5) & (this_mom15 > last_mom15)
         buy_mask = mom_positive & mom_increasing
         mom5_diff = this_mom5 - last_mom5

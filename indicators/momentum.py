@@ -17,7 +17,7 @@ class Momentum:
         self.start = start
         self.stop = stop
 
-    def compute(self) -> t.Union[pd.Series]:
+    def compute(self) -> t.Union[pd.DataFrame]:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
@@ -50,19 +50,15 @@ class Momentum:
 
 
 def main(influx: InfluxDBClient):
-    _start = time.time()
-    frequency = timedelta(minutes=1)
-    mom = Momentum(influx, 'coinbasepro', frequency,
-                   timedelta(hours=-1))
-    values = mom.compute().unstack(0).resample(frequency).asfreq()
-    # example of increasing momentum check
-    increasing = values > values.shift(1)
-    print(increasing.iloc[-1])
+    mom = Momentum(influx, 'coinbasepro',
+                   frequency=timedelta(minutes=5),
+                   start=timedelta(minutes=-30) - timedelta(seconds=15),
+                   stop=timedelta(0))
+    print(mom.compute()['NKN-USD'])
 
 
 if __name__ == '__main__':
     from settings import influx_db as influx_db_settings
-    import time
 
     influx_client = InfluxDBClient(influx_db_settings.INFLUX_URL,
                                    influx_db_settings.INFLUX_TOKEN,
