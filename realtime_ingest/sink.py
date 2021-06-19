@@ -1,6 +1,6 @@
+import typing as t
 from abc import ABC, abstractmethod
 from decimal import Decimal
-import typing as t
 
 from influxdb_client import Point
 from influxdb_client.client.write_api import WriteApi
@@ -54,24 +54,22 @@ class InfluxDBTradeSink(RecordSink):
         self.point_sink = InfluxDBPointSink(writer, *args, **kwargs)
 
     def send(self, trade: dict, /) -> None:
-        point = Point("matches") \
+        point = self.build_point(trade)
+        self.point_sink.send(point)
+
+    def build_point(self, trade: dict) -> Point:
+        return Point("matches") \
             .tag('exchange', self.exchange) \
             .tag('market', trade['product_id']) \
             .time(trade['time']) \
             .field('price', Decimal(trade['price'])) \
-            .field('size', Decimal(trade['size']))
-        self.point_sink.send(point)
+            .field('size', Decimal(trade['size'])) \
+            .field('trade_id', int(trade['trade_id']))
 
     def send_many(self, trades: t.Iterable[dict], /) -> None:
         points = []
         for trade in trades:
-            p = Point("matches") \
-                .tag('exchange', self.exchange) \
-                .tag('market', trade['product_id']) \
-                .tag('side', trade['side'])\
-                .time(trade['time']) \
-                .field('price', Decimal(trade['price'])) \
-                .field('size', Decimal(trade['size']))
+            p = self.build_point(trade)
             points.append(p)
         self.point_sink.send_many(points)
 
