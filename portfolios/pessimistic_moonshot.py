@@ -1,4 +1,5 @@
 import logging
+import sys
 from datetime import timedelta
 
 from cbpro import AuthenticatedClient
@@ -40,6 +41,7 @@ def main() -> None:
         manager.run()
     finally:
         manager.shutdown()
+    sys.exit(1)
 
 
 if __name__ == '__main__':

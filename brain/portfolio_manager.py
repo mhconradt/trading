@@ -20,6 +20,7 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             PendingCancelLimitSell, DesiredMarketSell,
                             PendingMarketSell,
                             Download)
+from brain.position_counter import PositionCounter
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import get_server_time, place_market_order, \
@@ -51,7 +52,8 @@ class PortfolioManager:
         # avoid congesting system with dozens of tiny positions
         self.min_position_size = Decimal('10')
         self.max_positions = 100
-        self.position_count = 0
+
+        self.counter = PositionCounter()
 
         self.buy_age_limit = timedelta(minutes=1)
         self.sell_age_limit = timedelta(minutes=1)
@@ -80,7 +82,6 @@ class PortfolioManager:
 
         self.cool_down = cool_down
         self.stop_loss = stop_loss
-        self.next_position_id = 0
         self.gains = Decimal('0')
         self.blacklist = market_blacklist
 
@@ -93,7 +94,7 @@ class PortfolioManager:
         nil_weights = Series([], dtype=np.float64)
         if spending_limit < self.min_position_size:
             return nil_weights
-        if self.position_count == self.max_positions:
+        if self.counter.count == self.max_positions:
             return nil_weights
         cooling_down = filter(self.cool_down.cooling_down, scores.index)
         allowed = scores.index.difference(cooling_down)
@@ -107,7 +108,7 @@ class PortfolioManager:
         hypothetical_sizes = cumulative_normalized_scores * spending_limit
         hypothetical_sizes_ok = hypothetical_sizes >= self.min_position_size
         min_position_size_limit = int(hypothetical_sizes_ok.sum())
-        position_count_limit = self.max_positions - self.position_count
+        position_count_limit = self.max_positions - self.counter.count
         limit = min(min_position_size_limit, position_count_limit)
         if not limit:
             return nil_weights
@@ -134,9 +135,9 @@ class PortfolioManager:
             assert isinstance(market, str)
             price = self.prices[market]
             size = weight * spending_limit / price
-            self.next_position_id += 1
             allocation = weight * starting_budget
-            previous_state = Download(number=self.next_position_id)
+            self.counter.increment()
+            previous_state = Download(number=self.counter.monotonic_count)
             buy = DesiredLimitBuy(price=price,
                                   size=size,
                                   market=market,
@@ -146,7 +147,6 @@ class PortfolioManager:
             self.allocations += allocation
             logger.info(f"{buy}")
             self.desired_limit_buys.appendleft(buy)
-            self.position_count += 1
         return None
 
     def check_desired_buys(self) -> None:
@@ -218,7 +218,7 @@ class PortfolioManager:
                 # candidate explanation is self-trade prevention
                 # we don't do anything about this
                 self.tracker.forget(order_id)
-                self.position_count -= 1
+                self.counter.decrement()
                 continue
             order = self.orders[order_id]
             status = order['status']
@@ -371,10 +371,10 @@ class PortfolioManager:
                 self.tracker.forget(order_id)
                 size = Decimal(order['size'])
                 filled_size = Decimal(order['filled_size'])
-                self.position_count -= 1
+                self.counter.decrement()
                 remainder = size - filled_size
                 if filled_size:
-                    self.position_count += 1
+                    self.counter.increment()
                     executed_value = Decimal(order['executed_value'])
                     executed_price = executed_value / filled_size
                     fee = Decimal(order['fill_fees'])
@@ -386,7 +386,7 @@ class PortfolioManager:
                     logger.info(f"{sold}")
                     self.sells.append(sold)
                 if remainder:
-                    self.position_count += 1
+                    self.counter.increment()
                     transition = 'ext. cancelled'
                     desired_sell = DesiredMarketSell(market=sell.market,
                                                      size=remainder,
@@ -491,10 +491,10 @@ class PortfolioManager:
                 executed_value = Decimal(order['executed_value'])
                 size = Decimal(order['size'])
                 filled_size = Decimal(order['filled_size'])
-                self.position_count -= 1
+                self.counter.decrement()
                 remainder = size - filled_size
                 if filled_size:
-                    self.position_count += 1
+                    self.counter.increment()
                     state_change = 'partial fill' if remainder else 'filled'
                     executed_price = executed_value / filled_size
                     sold = Sold(price=executed_price, size=filled_size,
@@ -506,7 +506,7 @@ class PortfolioManager:
                     logger.info(f"{sold}")
                     self.sells.append(sold)
                 if remainder:
-                    self.position_count += 1
+                    self.counter.increment()
                     desired_sell = DesiredMarketSell(market=sell.market,
                                                      size=remainder,
                                                      previous_state=sell,
@@ -526,7 +526,7 @@ class PortfolioManager:
             order_id = cancellation.order_id
             if order_id not in self.orders:
                 self.tracker.forget(order_id)
-                self.position_count -= 1  # canceled without fill
+                self.counter.decrement()
                 continue
             order = self.orders[order_id]
             status = order['status']
@@ -567,15 +567,15 @@ class PortfolioManager:
                 filled_size = Decimal(order['filled_size'] if order else '0')
                 remainder = cancellation.size - filled_size
                 if remainder:
+                    self.counter.increment()
                     buy = DesiredMarketSell(
                         size=remainder, market=cancellation.market,
                         previous_state=cancellation,
                         state_change='partially filled')
                     logger.info(f"{buy}")
                     self.desired_market_sells.append(buy)
-                    self.position_count += 1  # fork
                 if order is None or not filled_size:
-                    self.position_count -= 1
+                    self.counter.decrement()
                     continue
                 executed_price = e_v / filled_size
                 filled = filled_size == cancellation.size
@@ -605,7 +605,7 @@ class PortfolioManager:
                     print(f"Sold! {sell.market}: ${gain}")
                     break
                 state = state.previous_state
-            self.position_count -= 1
+            self.counter.decrement()
 
     @retry(requests.RequestException, tries=5, delay=15)
     def set_tick_variables(self) -> None:
@@ -650,13 +650,12 @@ class PortfolioManager:
             if not balance:
                 continue
             price = self.prices[market]
-            tail = Download(self.next_position_id)
+            self.counter.increment()
+            tail = Download(self.counter.monotonic_count)
             position = ActivePosition(price, balance, fees=Decimal('0'),
                                       market=market, start=self.tick_time,
                                       previous_state=tail,
                                       state_change='downloaded')
-            self.position_count += 1
-            self.next_position_id += 1
             positions.append(position)
         self.active_positions = positions
 
