@@ -25,7 +25,7 @@ class MoonShot:
     def compute(self) -> t.Union[pd.Series]:
         mom_5 = self.momentum_5m.compute()
         mom_15 = self.momentum_15m.compute()
-        if not len(mom_5) >= 2 and len(mom_15) > 2:
+        if not (len(mom_5) >= 2 and len(mom_15) >= 2):
             raise StaleDataException(f"Insufficient momentum for moonshots.")
         this_mom5 = mom_5.iloc[-1]
         this_mom15 = mom_15.iloc[-1]

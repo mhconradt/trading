@@ -60,6 +60,8 @@ class TradesWebsocketClient(cbpro.WebsocketClient):
         # all markets are now being processed in order
         needs_catch_up = watermark and trade_id > watermark + 1
         all_caught_up = not (any(self.catching_up.values()) or needs_catch_up)
+        if not self.catching_up[product] and needs_catch_up:
+            self.replayed_missed_tasks = False
         self.catching_up[product] = needs_catch_up
         if needs_catch_up:
             print(f'catching up {product} {watermark}->{trade_id}')

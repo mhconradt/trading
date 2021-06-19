@@ -36,6 +36,17 @@ class RootState(PositionState):
         return f"#{self.number}"
 
 
+@dataclass(repr=False)
+class Download(PositionState):
+    number: int
+
+    state_change: t.Optional[str] = None
+    previous_state: t.Optional[PositionState] = None
+
+    def __repr__(self) -> str:
+        return f"download #{self.number}"
+
+
 @dataclass
 class DesiredLimitBuy(PositionState):
     """
@@ -180,7 +191,7 @@ class Sold(PositionState):
 
 
 if __name__ == '__main__':
-    root = RootState(number=1)
+    root = Download(number=1)
     desired_buy = DesiredLimitBuy(market='BTC-USD', price=Decimal('42000.'),
                                   size=Decimal('1.234'), previous_state=root,
                                   state_change='buy STRONGLY indicated')

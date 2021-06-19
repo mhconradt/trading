@@ -4,12 +4,14 @@ import typing as t
 from collections import deque
 from datetime import datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 import dateutil.parser
 import numpy as np
 import requests
 from cbpro import AuthenticatedClient
 from pandas import Series
+from retry import retry
 
 from brain.order_tracker import SyncCoinbaseOrderTracker
 from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
@@ -17,13 +19,16 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             PendingCancelBuy,
                             PendingCancelLimitSell, DesiredMarketSell,
                             PendingMarketSell,
-                            RootState)
+                            Download)
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
-from helper.coinbase import get_server_time
+from helper.coinbase import get_server_time, place_market_order, \
+    place_limit_order
 from indicators import InstantIndicator
 
 # TODO: Rate limiting
+# TODO: Kubernetes
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +38,7 @@ class PortfolioManager:
                  score_indicator: InstantIndicator, stop_loss: SimpleStopLoss,
                  cool_down: VolatilityCoolDown,
                  market_blacklist: t.Container[str]):
+        self.initialized = False
         self.client = client
         self.price_indicator = price_indicator
         self.score_indicator = score_indicator
@@ -57,7 +63,8 @@ class PortfolioManager:
         self.prices: t.Optional[Series] = None
         self.scores: t.Optional[Series] = None
         self.market_info: t.Optional[t.Dict[str, dict]] = None
-        self.fee: t.Optional[Decimal] = None
+        self.taker_fee: t.Optional[Decimal] = None
+        self.maker_fee: t.Optional[Decimal] = None
 
         # STATES
         self.desired_limit_buys: deque[DesiredLimitBuy] = deque()
@@ -120,7 +127,7 @@ class PortfolioManager:
         Don't queue if would violate volatility cooldown.
         """
         starting_budget = self.budget  # this computed property changes in loop
-        spending_limit = starting_budget / (Decimal('1') + self.fee)
+        spending_limit = starting_budget / (Decimal('1') + self.taker_fee)
         weights = self.compute_buy_weights(self.scores, spending_limit)
         decimal_weights = weights.map(Decimal)
         for market, weight in decimal_weights.iteritems():
@@ -129,7 +136,7 @@ class PortfolioManager:
             size = weight * spending_limit / price
             self.next_position_id += 1
             allocation = weight * starting_budget
-            previous_state = RootState(number=self.next_position_id)
+            previous_state = Download(number=self.next_position_id)
             buy = DesiredLimitBuy(price=price,
                                   size=size,
                                   market=market,
@@ -166,11 +173,11 @@ class PortfolioManager:
                 continue
             max_size = Decimal(info['base_max_size'])
             size = min(size, max_size)
-            order = self.client.place_limit_order(market, side='buy',
-                                                  price=str(price),
-                                                  size=str(size),
-                                                  time_in_force='GTC',
-                                                  stp='cn')
+            order = place_limit_order(self.client, market, side='buy',
+                                      price=str(price),
+                                      size=str(size),
+                                      time_in_force='GTC',
+                                      stp='cn')
             self.cool_down.bought(market)
             self.allocations -= buy.allocation  # we tried
             if 'id' not in order:
@@ -314,9 +321,11 @@ class PortfolioManager:
                 logger.info(f"{limit_sell}")
                 self.desired_limit_sells.append(limit_sell)
                 continue
-            order = self.client.place_market_order(sell.market,
-                                                   side='sell',
-                                                   size=sell.size)
+            client_oid = str(uuid4())
+            order = place_market_order(self.client, sell.market,
+                                       side='sell',
+                                       size=sell.size,
+                                       client_oid=client_oid)
             if 'id' not in order:
                 next_generation.append(sell)  # neanderthal retry
                 logger.warning(f"Place order error message {order}")
@@ -405,12 +414,12 @@ class PortfolioManager:
             quote_increment = Decimal(market_info['quote_increment'])
             price = sell.price.quantize(quote_increment)
             post_only = market_info['post_only']
-            order = self.client.place_limit_order(sell.market, side='sell',
-                                                  price=str(price),
-                                                  size=str(sell.size),
-                                                  time_in_force='GTC',
-                                                  stp='co',
-                                                  post_only=post_only)
+            order = place_limit_order(self.client, sell.market, side='sell',
+                                      price=str(price),
+                                      size=str(sell.size),
+                                      time_in_force='GTC',
+                                      stp='co',
+                                      post_only=post_only)
             if 'id' not in order:
                 next_generation.append(sell)
                 logger.debug(f"Place order error message {order}")
@@ -598,8 +607,6 @@ class PortfolioManager:
                 state = state.previous_state
             self.position_count -= 1
 
-    from retry import retry
-
     @retry(requests.RequestException, tries=5, delay=15)
     def set_tick_variables(self) -> None:
         self.set_portfolio_available_funds()
@@ -608,9 +615,14 @@ class PortfolioManager:
         self.market_info = {product['id']: product for product in
                             self.client.get_products()}
         self.tick_time, self.orders = self.tracker.barrier_snapshot()
+        self.set_fee()
+
+    @retry((requests.RequestException, KeyError), tries=5, delay=5)
+    def set_fee(self):
         send_message = getattr(self.client, '_send_message')
         fee_info = send_message('GET', '/fees')
-        self.fee = Decimal(fee_info['taker_fee_rate'])
+        self.taker_fee = Decimal(fee_info['taker_fee_rate'])
+        self.maker_fee = Decimal(fee_info['maker_fee_rate'])
 
     @retry(requests.RequestException, tries=5, delay=15)
     def set_portfolio_available_funds(self):
@@ -621,24 +633,42 @@ class PortfolioManager:
     def shutdown(self) -> None:
         logger.info(f"Shutting down...")
         self.client.cancel_all()
+
+    def initialize(self) -> None:
+        self.client.cancel_all()
+        self.initialize_active_positions()
+
+    def initialize_active_positions(self) -> None:
+        positions: t.List[ActivePosition] = []
         for account in self.client.get_accounts():
-            # TODO: Lots of potential here
-            currency = account['currency']
-            if currency == 'USD':
+            if account['currency'] == 'USD':
                 continue
-            product = f'{account["currency"]}-USD'
-            available = account['available']
-            if Decimal(available):
-                self.client.place_market_order(product,
-                                               side='sell',
-                                               size=available)
-                logger.info(f"Placed market sell for {available} {currency}")
+            market = f"{account['currency']}-USD"
+            if market not in self.market_info:
+                continue
+            balance = Decimal(account['balance'])
+            if not balance:
+                continue
+            price = self.prices[market]
+            tail = Download(self.next_position_id)
+            position = ActivePosition(price, balance, fees=Decimal('0'),
+                                      market=market, start=self.tick_time,
+                                      previous_state=tail,
+                                      state_change='downloaded')
+            self.position_count += 1
+            self.next_position_id += 1
+            positions.append(position)
+        self.active_positions = positions
 
     def run(self) -> t.NoReturn:
+        self.set_tick_variables()
         last_tick = get_server_time()
         while True:
             iteration_start = time.time()
             self.set_tick_variables()
+            if not self.initialized:
+                self.initialize()
+                self.initialized = True
             if not self.tick_time > last_tick:
                 # wait for order snapshot to catch up
                 # this should never happen with the synchronous order tracker
