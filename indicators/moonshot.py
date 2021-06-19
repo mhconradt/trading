@@ -6,7 +6,7 @@ from influxdb_client import InfluxDBClient
 
 from exceptions import StaleDataException
 from .candles import CandleSticks
-from .momentum import Momentum
+from .momentum import IncrementalMomentum as Momentum
 from .ticker import Ticker
 
 

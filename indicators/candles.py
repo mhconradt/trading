@@ -7,6 +7,9 @@ from influxdb_client import InfluxDBClient
 from exceptions import StaleDataException
 
 
+# TODO: Mix pre-aggregated candlesticks with raw trade data
+
+
 class CandleSticks:
     def __init__(self, db: InfluxDBClient, exchange: str, frequency: timedelta,
                  start: timedelta,
@@ -37,13 +40,14 @@ class CandleSticks:
             raise StaleDataException(
                 f"No candles between {self.start} and {self.stop}"
             )
+        print(df)
         return df[['open', 'high', 'low', 'close', 'volume']]
 
 
 def main(influx: InfluxDBClient):
     _start = time.time()
-    sticks = CandleSticks(influx, 'coinbasepro', timedelta(minutes=15),
-                          timedelta(hours=-3))
+    sticks = CandleSticks(influx, 'coinbasepro', timedelta(hours=6),
+                          timedelta(hours=-12))
     print(sticks.compute())
     print(time.time() - _start)
 

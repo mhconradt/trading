@@ -5,7 +5,6 @@ from datetime import timedelta
 
 import cbpro
 from influxdb_client import InfluxDBClient
-from influxdb_client.client.write_api import ASYNCHRONOUS
 
 from helper.coinbase import get_usd_product_ids, get_server_time
 from realtime_ingest.sink import RecordSink, BatchingSink, InfluxDBTradeSink
@@ -31,11 +30,16 @@ def initialize_watermarks(influx_client: InfluxDBClient,
             |> yield(name: "watermark")
     """, data_frame_index=['market'], params={'bucket': bucket,
                                               'window_start': -window})
-    watermarks = result['_value'].to_dict()
-    if not watermarks:  # starting from scratch
+    if not len(result):  # starting from scratch
         return watermarks_at_time(get_server_time() - window, products)
-    return {market: watermark for market, watermark in watermarks.items()
-            if market in products}
+
+    watermarks = result['_value'].to_dict()
+    watermarks = {market: watermark for market, watermark in watermarks.items()
+                  if market in products}
+    remaining = set(products).difference(watermarks)
+    remaining_watermarks = watermarks_at_time(get_server_time() - window,
+                                              remaining)
+    return {**watermarks, **remaining_watermarks}
 
 
 def catchup(product: str, frm: int, to: int) -> t.Iterable[dict]:
@@ -107,37 +111,37 @@ class TradesWebsocketClient(cbpro.WebsocketClient):
 
 def main() -> None:
     products = get_usd_product_ids()
-    client = InfluxDBClient(influx_db_settings.INFLUX_URL,
-                            influx_db_settings.INFLUX_TOKEN,
-                            org_id=influx_db_settings.INFLUX_ORG_ID,
-                            org=influx_db_settings.INFLUX_ORG)
-    replay.initialize(client.tasks_api())
-    watermarks = initialize_watermarks(client, "trades", products)
+    influx_client = InfluxDBClient(influx_db_settings.INFLUX_URL,
+                                   influx_db_settings.INFLUX_TOKEN,
+                                   org_id=influx_db_settings.INFLUX_ORG_ID,
+                                   org=influx_db_settings.INFLUX_ORG)
+    replay.initialize(influx_client.tasks_api())
+    watermarks = initialize_watermarks(influx_client, "trades", products)
     sink = InfluxDBTradeSink(EXCHANGE_NAME,
-                             client.write_api(write_options=ASYNCHRONOUS),
+                             influx_client.write_api(),
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG,
                              bucket="trades")
-    sink = BatchingSink(4, sink)
+    sink = BatchingSink(1024, sink)
     while True:
+        trade_client = TradesWebsocketClient(sink, watermarks,
+                                             products=products)
         try:
-            client = TradesWebsocketClient(sink, watermarks,
-                                           products=products)
-            client.start()
-            while not client.stop:
+            trade_client.start()
+            while not trade_client.stop:
                 time.sleep(5)
         except KeyboardInterrupt:
             break
         finally:
             # catch up from last state
             sink.flush()
-            watermarks = initialize_watermarks(client, "trades",
+            watermarks = initialize_watermarks(influx_client, "trades",
                                                products)
             # out here so it doesn't wait on keyboard interrupt
             print('howdy')
-            client.close()  # this can block
+            trade_client.close()  # this can block
         time.sleep(1)
-    if client.error:
+    if trade_client.error:
         sys.exit(1)
     else:
         sys.exit(0)

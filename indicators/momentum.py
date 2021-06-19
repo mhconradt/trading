@@ -5,6 +5,7 @@ import pandas as pd
 from influxdb_client import InfluxDBClient
 
 from exceptions import StaleDataException
+from .ticker import Ticker
 
 
 class Momentum:
@@ -47,6 +48,42 @@ class Momentum:
                 f"No momentum between {self.start} and {self.stop}"
             )
         return df.momentum.unstack(0)
+
+
+class IncrementalMomentum:
+    def __init__(self, db: InfluxDBClient, exchange: str, frequency: timedelta,
+                 start: timedelta,
+                 stop=timedelta(0)):
+        self.db = db
+        self.frequency = frequency
+        self.exchange = exchange
+        self.start = start
+        self.stop = stop
+        self.ticker = Ticker(db, exchange)
+
+    def compute(self) -> t.Union[pd.DataFrame]:
+        query_api = self.db.query_api()
+        parameters = {'exchange': self.exchange,
+                      'freq': self.frequency,
+                      'start': self.start - self.frequency,
+                      'stop': self.stop,
+                      'duration': 1 * self.frequency}
+        df = query_api.query_data_frame("""
+            at = from(bucket: "candles")
+            |> range(start: start, stop: stop)
+            |> filter(fn: (r) => r["_measurement"] == "candles_${string(v: freq)}")
+            |> filter(fn: (r) => r["exchange"] == exchange)
+            |> filter(fn: (r) => r["_field"] == "close")
+            |> yield()
+        """, data_frame_index=['market', '_time'], params=parameters)
+        if not len(df):
+            raise StaleDataException(
+                f"No momentum between {self.start} and {self.stop}"
+            )
+        close = df.close.unstack(0)
+        ticker = self.ticker.compute()
+        closes = close.append(ticker)
+        return closes / closes.shift(1)
 
 
 def main(influx: InfluxDBClient):

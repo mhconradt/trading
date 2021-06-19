@@ -8,7 +8,7 @@ from cbpro import PublicClient
 public_client = PublicClient()
 
 
-def watermarks_at_time(start: datetime, products: t.List[str]) -> dict:
+def watermarks_at_time(start: datetime, products: t.Iterable[str]) -> dict:
     watermarks = {}
     for product in products:
         trade_id = find_trade_id(product, start)
