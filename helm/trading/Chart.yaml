@@ -1,0 +1,9 @@
+apiVersion: v2
+appVersion: 0.0.1
+name: trading
+version: 0.0.1
+dependencies:
+  - name: influxdb
+    version: 2.2.7
+    repository: https://charts.bitnami.com/bitnami
+description: Algorithmic trading system and supporting data ingestion services.

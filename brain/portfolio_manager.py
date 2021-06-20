@@ -29,6 +29,7 @@ from indicators import InstantIndicator
 
 # TODO: Rate limiting
 # TODO: Kubernetes
+# TODO: Track realized gains
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class PortfolioManager:
 
         self.cool_down = cool_down
         self.stop_loss = stop_loss
-        self.gains = Decimal('0')
+        self.realized_gains = Decimal('0')
         self.blacklist = market_blacklist
 
     @property
@@ -135,7 +136,7 @@ class PortfolioManager:
             assert isinstance(market, str)
             price = self.prices[market]
             size = weight * spending_limit / price
-            allocation = weight * starting_budget
+            allocation = weight * spending_limit
             self.counter.increment()
             previous_state = RootState(number=self.counter.monotonic_count)
             buy = DesiredLimitBuy(price=price,
@@ -569,10 +570,11 @@ class PortfolioManager:
                 remainder = cancellation.size - filled_size
                 if remainder:
                     self.counter.increment()
+                    transition = 'partial fill' if filled_size else 'unfilled'
                     buy = DesiredMarketSell(
                         size=remainder, market=cancellation.market,
                         previous_state=cancellation,
-                        state_change='partially filled')
+                        state_change=transition)
                     logger.info(f"{buy}")
                     self.desired_market_sells.append(buy)
                 if order is None or not filled_size:
@@ -580,12 +582,12 @@ class PortfolioManager:
                     continue
                 executed_price = e_v / filled_size
                 filled = filled_size == cancellation.size
-                state_change = 'filled' if filled else 'partial fill'
+                transition = 'filled' if filled else 'partial fill'
                 sell = Sold(price=executed_price, size=filled_size,
                             fees=Decimal(order['fill_fees']),
                             market=cancellation.market,
                             previous_state=cancellation,
-                            state_change=state_change)
+                            state_change=transition)
                 logger.info(f"{sell}")
                 self.sells.append(sell)
             elif order['status'] in {'active', 'pending', 'open'}:
