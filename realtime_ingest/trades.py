@@ -122,7 +122,7 @@ def main() -> None:
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG,
                              bucket="trades")
-    sink = BatchingSink(1024, sink)
+    sink = BatchingSink(16, sink)
     while True:
         trade_client = TradesWebsocketClient(sink, watermarks,
                                              products=products)

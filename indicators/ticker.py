@@ -1,4 +1,3 @@
-import typing as t
 from datetime import timedelta
 
 import pandas as pd
@@ -16,7 +15,7 @@ class Ticker:
         self.start = start
         self.stop = stop
 
-    def compute(self) -> t.Union[pd.Series]:
+    def compute(self) -> pd.Series:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'start': self.start,

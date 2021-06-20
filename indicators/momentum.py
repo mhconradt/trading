@@ -1,11 +1,10 @@
-import typing as t
 from datetime import timedelta
 
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
 from exceptions import StaleDataException
-from .ticker import Ticker
+from indicators.ticker import Ticker
 
 
 class Momentum:
@@ -18,7 +17,7 @@ class Momentum:
         self.start = start
         self.stop = stop
 
-    def compute(self) -> t.Union[pd.DataFrame]:
+    def compute(self) -> pd.DataFrame:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
@@ -38,7 +37,7 @@ class Momentum:
                  on: ["market", "_time"], 
                  method: "inner")
             |> map(fn: (r) => ({_time: r["_time"], 
-                market: r["market"], 
+                market: r["market"],
                 momentum: (r["_value_at"] / r["_value_before"]) - 1.0
                 }))
             |> yield()
@@ -61,7 +60,7 @@ class IncrementalMomentum:
         self.stop = stop
         self.ticker = Ticker(db, exchange)
 
-    def compute(self) -> t.Union[pd.DataFrame]:
+    def compute(self) -> pd.DataFrame:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
@@ -80,10 +79,10 @@ class IncrementalMomentum:
             raise StaleDataException(
                 f"No momentum between {self.start} and {self.stop}"
             )
-        close = df.close.unstack(0)
+        close = df['_value'].unstack(0)
         ticker = self.ticker.compute()
         closes = close.append(ticker)
-        return closes / closes.shift(1)
+        return (closes / closes.shift(1)) - 1.
 
 
 def main(influx: InfluxDBClient):

@@ -1,4 +1,3 @@
-import typing as t
 from datetime import timedelta
 
 import pandas as pd
@@ -22,7 +21,7 @@ class MoonShot:
                                      start=timedelta(minutes=-45) - max_lag,
                                      stop=timedelta(0))
 
-    def compute(self) -> t.Union[pd.Series]:
+    def compute(self) -> pd.Series:
         mom_5 = self.momentum_5m.compute()
         mom_15 = self.momentum_15m.compute()
         if not (len(mom_5) >= 2 and len(mom_15) >= 2):
@@ -53,7 +52,7 @@ class PessimisticMoonShot(MoonShot):
         self.ticker = Ticker(client, exchange, start=timedelta(minutes=-1),
                              stop=timedelta(0))
 
-    def compute(self) -> t.Union[pd.Series]:
+    def compute(self) -> pd.Series:
         closes = self.candles.compute().close.unstack('market')
         most_recent_price = self.ticker.compute()
         naive_scores = super(PessimisticMoonShot, self).compute()

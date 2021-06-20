@@ -19,7 +19,7 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             PendingCancelBuy,
                             PendingCancelLimitSell, DesiredMarketSell,
                             PendingMarketSell,
-                            Download)
+                            Download, RootState)
 from brain.position_counter import PositionCounter
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
@@ -56,7 +56,7 @@ class PortfolioManager:
         self.counter = PositionCounter()
 
         self.buy_age_limit = timedelta(minutes=1)
-        self.sell_age_limit = timedelta(minutes=1)
+        self.sell_age_limit = timedelta(minutes=5)
 
         # TICK VARIABLES
         self.tick_time: t.Optional[datetime] = None
@@ -100,7 +100,7 @@ class PortfolioManager:
         allowed = scores.index.difference(cooling_down)
         allowed = allowed.difference(self.blacklist)
         scores = scores.loc[allowed]
-        positive_scores = scores[scores.notna() & scores.gt(0.)]
+        positive_scores = scores[scores.notna() & scores.gt(0.)].map(Decimal)
         if not len(positive_scores):
             return nil_weights
         ranked_scores = positive_scores.sort_values(ascending=False)
@@ -137,7 +137,7 @@ class PortfolioManager:
             size = weight * spending_limit / price
             allocation = weight * starting_budget
             self.counter.increment()
-            previous_state = Download(number=self.counter.monotonic_count)
+            previous_state = RootState(number=self.counter.monotonic_count)
             buy = DesiredLimitBuy(price=price,
                                   size=size,
                                   market=market,
@@ -224,7 +224,7 @@ class PortfolioManager:
             status = order['status']
             # treat these the same?
             if status in {'open', 'pending', 'active'}:
-                server_age = pending_buy.created_at - self.tick_time
+                server_age = self.tick_time - pending_buy.created_at
                 time_limit_expired = server_age > self.buy_age_limit
                 if time_limit_expired:
                     try:
@@ -324,7 +324,7 @@ class PortfolioManager:
             client_oid = str(uuid4())
             order = place_market_order(self.client, sell.market,
                                        side='sell',
-                                       size=sell.size,
+                                       size=str(sell.size),
                                        client_oid=client_oid)
             if 'id' not in order:
                 next_generation.append(sell)  # neanderthal retry
@@ -446,7 +446,8 @@ class PortfolioManager:
         next_generation: t.List[PendingLimitSell] = []
         for sell in self.pending_limit_sells:
             order_id = sell.order_id
-            trading_disabled = self.market_info[sell.market]
+            market_info = self.market_info[sell.market]
+            trading_disabled = market_info['trading_disabled']
             if sell.created_at > self.tick_time:
                 # created during this generation, nothing to see here
                 next_generation.append(sell)
@@ -611,7 +612,7 @@ class PortfolioManager:
     def set_tick_variables(self) -> None:
         self.set_portfolio_available_funds()
         self.prices = self.price_indicator.compute().map(Decimal)
-        self.scores = self.score_indicator.compute().map(Decimal)
+        self.scores = self.score_indicator.compute()
         self.market_info = {product['id']: product for product in
                             self.client.get_products()}
         self.tick_time, self.orders = self.tracker.barrier_snapshot()

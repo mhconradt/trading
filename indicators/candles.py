@@ -1,4 +1,3 @@
-import typing as t
 from datetime import timedelta
 
 import pandas as pd
@@ -20,7 +19,7 @@ class CandleSticks:
         self.start = start
         self.stop = stop
 
-    def compute(self) -> t.Union[pd.DataFrame]:
+    def compute(self) -> pd.DataFrame:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
@@ -40,7 +39,6 @@ class CandleSticks:
             raise StaleDataException(
                 f"No candles between {self.start} and {self.stop}"
             )
-        print(df)
         return df[['open', 'high', 'low', 'close', 'volume']]
 
 
