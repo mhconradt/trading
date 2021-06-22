@@ -25,7 +25,7 @@ class Momentum:
                       'stop': self.stop,
                       'duration': 1 * self.frequency}
         df = query_api.query_data_frame("""
-            at = from(bucket: "trading")
+            at = from(bucket: "candles")
             |> range(start: start, stop: stop)
             |> filter(fn: (r) => r["_measurement"] == "candles_${string(v: freq)}")
             |> filter(fn: (r) => r["exchange"] == exchange)
@@ -68,7 +68,7 @@ class IncrementalMomentum:
                       'stop': self.stop,
                       'duration': 1 * self.frequency}
         df = query_api.query_data_frame("""
-            at = from(bucket: "trading")
+            at = from(bucket: "candles")
             |> range(start: start, stop: stop)
             |> filter(fn: (r) => r["_measurement"] == "candles_${string(v: freq)}")
             |> filter(fn: (r) => r["exchange"] == exchange)

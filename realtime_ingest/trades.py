@@ -119,12 +119,12 @@ def main() -> None:
     replay.initialize(influx_client.tasks_api())
     create_all(influx_client, org_id=influx_db_settings.INFLUX_ORG_ID,
                org=influx_db_settings.INFLUX_ORG)
-    watermarks = initialize_watermarks(influx_client, "trading", products)
+    watermarks = initialize_watermarks(influx_client, "trades", products)
     sink = InfluxDBTradeSink(EXCHANGE_NAME,
                              influx_client.write_api(),
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG,
-                             bucket="trading")
+                             bucket="trades")
     sink = BatchingSink(8, sink)
     while True:
         trade_client = TradesWebsocketClient(sink, watermarks,
@@ -138,7 +138,7 @@ def main() -> None:
         finally:
             # catch up from last state
             sink.flush()
-            watermarks = initialize_watermarks(influx_client, "trading",
+            watermarks = initialize_watermarks(influx_client, "trades",
                                                products)
             # out here so it doesn't wait on keyboard interrupt
             print('howdy')

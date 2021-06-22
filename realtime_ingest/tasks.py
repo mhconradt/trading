@@ -142,20 +142,20 @@ class TaskDefinition:
         return None
 
 
-candles_1m = TaskDefinition('trading', name='candles_1m', every='1m',
-                            offset='5s', dst='trading')
-candles_5m = TaskDefinition('trading', name='candles_5m', every='5m',
-                            offset='5s', dst='trading')
-candles_15m = TaskDefinition('trading', name='candles_15m', every='15m',
-                             offset='5s', dst='trading')
-candles_1h = TaskDefinition('trading', name='candles_1h', every='1h',
-                            offset='5s', dst='trading')
-candles_6h = TaskDefinition('trading', name='candles_6h', every='6h',
-                            offset='5s', dst='trading')
-candles_4h = TaskDefinition('trading', name='candles_4h', every='4h',
-                            offset='5s', dst='trading')
-candles_1d = TaskDefinition('trading', name='candles_1d', every='1d',
-                            offset='5s', dst='trading')
+candles_1m = TaskDefinition('trades', name='candles_1m', every='1m',
+                            offset='5s', dst='candles')
+candles_5m = TaskDefinition('trades', name='candles_5m', every='5m',
+                            offset='5s', dst='candles')
+candles_15m = TaskDefinition('trades', name='candles_15m', every='15m',
+                             offset='5s', dst='candles')
+candles_1h = TaskDefinition('trades', name='candles_1h', every='1h',
+                            offset='5s', dst='candles')
+candles_6h = TaskDefinition('trades', name='candles_6h', every='6h',
+                            offset='5s', dst='candles')
+candles_4h = TaskDefinition('trades', name='candles_4h', every='4h',
+                            offset='5s', dst='candles')
+candles_1d = TaskDefinition('trades', name='candles_1d', every='1d',
+                            offset='5s', dst='candles')
 
 
 def main():

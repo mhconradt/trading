@@ -23,7 +23,8 @@ from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import get_server_time, AuthenticatedClient
 from indicators import InstantIndicator
 
-# TODO: Track realized gains
+# TODO: Limit positions as a fraction of total assets
+# TODO: Limit buys as percentage
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,8 @@ class PortfolioManager:
             size = weight * spending_limit / price
             allocation = weight * spending_limit
             self.counter.increment()
-            previous_state = RootState(number=self.counter.monotonic_count)
+            previous_state = RootState(market=market,
+                                       number=self.counter.monotonic_count)
             buy = DesiredLimitBuy(price=price,
                                   size=size,
                                   market=market,
@@ -161,8 +163,10 @@ class PortfolioManager:
                 # could probably use post_only in the order flags
             elif info['cancel_only'] or info['post_only']:
                 continue
-            price = buy.price.quantize(Decimal(info['quote_increment']))
-            size = buy.size.quantize(Decimal(info['base_increment']))
+            price = buy.price.quantize(Decimal(info['quote_increment']),
+                                       rounding='ROUND_DOWN')
+            size = buy.size.quantize(Decimal(info['base_increment']),
+                                     rounding='ROUND_DOWN')
             min_size = Decimal(info['base_min_size'])
             if size < min_size:
                 continue
@@ -405,7 +409,7 @@ class PortfolioManager:
                 next_generation.append(sell)
                 continue
             quote_increment = Decimal(market_info['quote_increment'])
-            price = sell.price.quantize(quote_increment)
+            price = sell.price.quantize(quote_increment, rounding='ROUND_DOWN')
             post_only = market_info['post_only']
             order = self.client.retryable_limit_order(sell.market,
                                                       side='sell',
@@ -470,6 +474,7 @@ class PortfolioManager:
                         continue
                     cancellation = PendingCancelLimitSell(
                         market=sell.market,
+                        price=sell.price,
                         size=sell.size,
                         order_id=order_id,
                         created_at=sell.created_at,
@@ -659,7 +664,7 @@ class PortfolioManager:
                 continue
             price = self.prices[market]
             self.counter.increment()
-            tail = Download(self.counter.monotonic_count)
+            tail = Download(self.counter.monotonic_count, market=market)
             position = ActivePosition(price, balance, fees=Decimal('0'),
                                       market=market, start=self.tick_time,
                                       previous_state=tail,

@@ -1,5 +1,5 @@
 query = """
-from(bucket: "trading")
+from(bucket: "trades")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
   |> filter(fn: (r) => r["_measurement"] == "matches")
   |> filter(fn: (r) => r["exchange"] == "coinbasepro")

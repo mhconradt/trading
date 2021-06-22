@@ -28,7 +28,9 @@ class PositionState(ABC):
 @dataclass(repr=False)
 class RootState(PositionState):
     number: int
+    market: str
 
+    state_slug: str = 'root'
     state_change: t.Optional[str] = None
     previous_state: t.Optional[PositionState] = None
 
@@ -39,6 +41,9 @@ class RootState(PositionState):
 @dataclass(repr=False)
 class Download(PositionState):
     number: int
+    market: str
+
+    state_slug: str = 'downloaded'
 
     state_change: t.Optional[str] = None
     previous_state: t.Optional[PositionState] = None
@@ -52,11 +57,14 @@ class DesiredLimitBuy(PositionState):
     """
     We want to buy at most .size of base currency in .market for at most .price
     """
+
     price: Decimal
     size: Decimal
-    market: str
 
     allocation: Decimal
+
+    market: str
+    state_slug: str = 'desired_limit_buy'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -67,12 +75,14 @@ class PendingLimitBuy(PositionState):
     """
     We ordered .size of base currency in .market for .price * .size in quote.
     """
+
     price: Decimal
     size: Decimal
-    market: str
 
     order_id: str
     created_at: datetime
+    market: str
+    state_slug: str = 'pending_limit_buy'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -82,10 +92,11 @@ class PendingLimitBuy(PositionState):
 class PendingCancelBuy(PositionState):
     price: Decimal
     size: Decimal
-    market: str
 
     order_id: str
     created_at: datetime
+    market: str
+    state_slug: str = 'pending_cancel_buy'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -97,12 +108,14 @@ class ActivePosition(PositionState):
     We own .size of base currency in .base.
     We paid .price in .quote and .fees in .quote in fees.
     """
+
     price: Decimal
     size: Decimal
     fees: Decimal
-    market: str
 
     start: datetime
+    market: str
+    state_slug: str = 'active'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -113,8 +126,10 @@ class DesiredMarketSell(PositionState):
     """
     Sell .size of .base at the market.
     """
+
     size: Decimal
     market: str
+    state_slug: str = 'desired_market_sell'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -125,11 +140,13 @@ class PendingMarketSell(PositionState):
     """
     Selling .size of .base at the market.
     """
+
     size: Decimal
-    market: str
 
     order_id: str
     created_at: datetime
+    market: str
+    state_slug: str = 'pending_market_sell'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -140,9 +157,11 @@ class DesiredLimitSell(PositionState):
     """
     Sell at most .size of .base for at least .price in .quote.
     """
+
     price: Decimal
     size: Decimal
     market: str
+    state_slug: str = 'desired_limit_sell'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -153,12 +172,14 @@ class PendingLimitSell(PositionState):
     """
     We ordered .price * .size of .quote for .size in .base.
     """
+
     price: Decimal
     size: Decimal
-    market: str
 
     order_id: str
     created_at: datetime
+    market: str
+    state_slug: str = 'pending_limit_sell'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -166,11 +187,13 @@ class PendingLimitSell(PositionState):
 
 @dataclass
 class PendingCancelLimitSell(PositionState):
+    price: Decimal
     size: Decimal
-    market: str
 
     order_id: str
     created_at: datetime
+    market: str
+    state_slug: str = 'pending_cancel_limit_sell'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -181,23 +204,31 @@ class Sold(PositionState):
     """
     We sold .size of quote currency for .price * .size in base currency.
     """
+
     price: Decimal
     size: Decimal
     fees: Decimal
     market: str
+    state_slug: str = 'sold'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
 
+__all__ = ['DesiredMarketSell', 'DesiredLimitBuy', 'DesiredLimitSell',
+           'RootState', 'PendingCancelBuy', 'PendingLimitSell',
+           'PendingMarketSell', 'PendingLimitBuy', 'PendingCancelLimitSell',
+           'Sold', 'PositionState', 'ActivePosition', 'Download']
+
 if __name__ == '__main__':
-    root = Download(number=1)
+    root = Download(number=1, market='BTC-USD')
     desired_buy = DesiredLimitBuy(market='BTC-USD', price=Decimal('42000.'),
                                   size=Decimal('1.234'), previous_state=root,
-                                  state_change='buy STRONGLY indicated')
+                                  state_change='buy STRONGLY indicated',
+                                  allocation=Decimal('0'))
     pending_buy = PendingLimitBuy(market=desired_buy.market,
                                   price=desired_buy.price,
-                                  size=desired_buy.size, order_id='abcdef',
+                                  size=desired_buy.size, order_id='order',
                                   created_at=datetime.now(),
                                   previous_state=desired_buy,
                                   state_change='order created')

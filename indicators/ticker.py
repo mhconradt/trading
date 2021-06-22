@@ -21,7 +21,7 @@ class Ticker:
                       'start': self.start,
                       'stop': self.stop}
         df = query_api.query_data_frame("""
-            from(bucket: "trading")
+            from(bucket: "trades")
                 |> range(start: start, stop: stop)
                 |> filter(fn: (r) => r["_measurement"] == "matches")
                 |> filter(fn: (r) => r["exchange"] == exchange)

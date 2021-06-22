@@ -27,7 +27,7 @@ class CandleSticks:
                       'stop': self.stop}
         # catchup mechanism for candlesticks?
         df = query_api.query_data_frame("""
-            from(bucket: "trading")
+            from(bucket: "candles")
             |> range(start: start, stop: stop)
             |> filter(fn: (r) => r["_measurement"] == "candles_${string(v: freq)}")
             |> filter(fn: (r) => r["exchange"] == exchange)
