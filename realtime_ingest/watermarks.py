@@ -3,7 +3,8 @@ from datetime import datetime
 
 import dateutil.parser
 import requests
-from cbpro import PublicClient
+
+from helper.coinbase import wait_for_public_rate_limit, PublicClient
 
 public_client = PublicClient()
 
@@ -34,6 +35,7 @@ def find_trade_id_cursor(product_id: str, to: datetime, start: int,
 
 
 def find_trade_id(product_id: str, to: datetime) -> int:
+    wait_for_public_rate_limit()
     trades = public_client.get_product_trades(product_id)
     try:
         trade_id = next(trades)['trade_id']
@@ -44,6 +46,7 @@ def find_trade_id(product_id: str, to: datetime) -> int:
 
 def get_timestamp(product_id: str, trade_id: int) -> datetime:
     params = {'before': trade_id - 1, 'after': trade_id + 1}
+    wait_for_public_rate_limit()
     trades = requests.get(
         f"https://api.pro.coinbase.com/products/{product_id}/trades",
         params).json()

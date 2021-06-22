@@ -2,12 +2,12 @@ import logging
 import sys
 from datetime import timedelta
 
-from cbpro import AuthenticatedClient
 from influxdb_client import InfluxDBClient
 
 from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
+from helper.coinbase import AuthenticatedClient
 from indicators import Ticker, PessimisticMoonShot
 from settings import influx_db as influx_db_settings, \
     coinbase as coinbase_settings, portfolio as portfolio_settings

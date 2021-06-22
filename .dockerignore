@@ -1,3 +1,5 @@
 .market_data
 venv
 **/*.pyc
+helm
+terraform

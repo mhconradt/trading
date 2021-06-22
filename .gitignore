@@ -1,3 +1,9 @@
 .market_data
 **/*.pyc
 realtime_ingest/watermarks.json
+terraform/*.tfvars
+terraform/*.tfstate*
+terraform/.terraform.lock.hcl
+terraform/.terraform.tfstate.lock.info
+terraform/*.tfplan
+terraform/.terraform

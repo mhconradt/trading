@@ -49,7 +49,6 @@ class SyncCoinbaseOrderTracker(OrderTracker):
         if not self.watchlist:
             return {}
         for order in self.client.get_orders(status='all'):
-            print(order['id'])
             for i in range(index, -1, -1):
                 watch = self.watchlist[i]
                 order_id = order['id']

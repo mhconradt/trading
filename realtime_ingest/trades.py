@@ -6,9 +6,10 @@ from datetime import timedelta
 import cbpro
 from influxdb_client import InfluxDBClient
 
-from helper.coinbase import get_usd_product_ids, get_server_time
+from helper.coinbase import get_usd_product_ids, get_server_time, \
+    PublicClient
 from realtime_ingest.sink import RecordSink, BatchingSink, InfluxDBTradeSink
-from realtime_ingest.tasks import replay
+from realtime_ingest.tasks import replay, create_all
 from realtime_ingest.watermarks import watermarks_at_time
 from settings import influx_db as influx_db_settings
 
@@ -43,7 +44,7 @@ def initialize_watermarks(influx_client: InfluxDBClient,
 
 
 def catchup(product: str, frm: int, to: int) -> t.Iterable[dict]:
-    client = cbpro.PublicClient()
+    client = PublicClient()
     for trade in client.get_product_trades(product):
         trade_id = trade['trade_id']
         if trade_id >= to:
@@ -116,12 +117,14 @@ def main() -> None:
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG)
     replay.initialize(influx_client.tasks_api())
-    watermarks = initialize_watermarks(influx_client, "trades", products)
+    create_all(influx_client, org_id=influx_db_settings.INFLUX_ORG_ID,
+               org=influx_db_settings.INFLUX_ORG)
+    watermarks = initialize_watermarks(influx_client, "trading", products)
     sink = InfluxDBTradeSink(EXCHANGE_NAME,
                              influx_client.write_api(),
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG,
-                             bucket="trades")
+                             bucket="trading")
     sink = BatchingSink(16, sink)
     while True:
         trade_client = TradesWebsocketClient(sink, watermarks,
@@ -135,7 +138,7 @@ def main() -> None:
         finally:
             # catch up from last state
             sink.flush()
-            watermarks = initialize_watermarks(influx_client, "trades",
+            watermarks = initialize_watermarks(influx_client, "trading",
                                                products)
             # out here so it doesn't wait on keyboard interrupt
             print('howdy')

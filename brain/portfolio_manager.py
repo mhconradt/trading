@@ -4,14 +4,11 @@ import typing as t
 from collections import deque
 from datetime import datetime, timedelta
 from decimal import Decimal
-from uuid import uuid4
 
 import dateutil.parser
 import numpy as np
 import requests
-from cbpro import AuthenticatedClient
 from pandas import Series
-from retry import retry
 
 from brain.order_tracker import SyncCoinbaseOrderTracker
 from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
@@ -23,12 +20,9 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
 from brain.position_counter import PositionCounter
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
-from helper.coinbase import get_server_time, place_market_order, \
-    place_limit_order
+from helper.coinbase import get_server_time, AuthenticatedClient
 from indicators import InstantIndicator
 
-# TODO: Rate limiting
-# TODO: Kubernetes
 # TODO: Track realized gains
 
 logger = logging.getLogger(__name__)
@@ -174,11 +168,11 @@ class PortfolioManager:
                 continue
             max_size = Decimal(info['base_max_size'])
             size = min(size, max_size)
-            order = place_limit_order(self.client, market, side='buy',
-                                      price=str(price),
-                                      size=str(size),
-                                      time_in_force='GTC',
-                                      stp='cn')
+            order = self.client.retryable_limit_order(market, side='buy',
+                                                      price=str(price),
+                                                      size=str(size),
+                                                      time_in_force='GTC',
+                                                      stp='cn')
             self.cool_down.bought(market)
             self.allocations -= buy.allocation  # we tried
             if 'id' not in order:
@@ -322,11 +316,9 @@ class PortfolioManager:
                 logger.info(f"{limit_sell}")
                 self.desired_limit_sells.append(limit_sell)
                 continue
-            client_oid = str(uuid4())
-            order = place_market_order(self.client, sell.market,
-                                       side='sell',
-                                       size=str(sell.size),
-                                       client_oid=client_oid)
+            order = self.client.retryable_market_order(sell.market,
+                                                       side='sell',
+                                                       size=str(sell.size))
             if 'id' not in order:
                 next_generation.append(sell)  # neanderthal retry
                 logger.warning(f"Place order error message {order}")
@@ -415,12 +407,14 @@ class PortfolioManager:
             quote_increment = Decimal(market_info['quote_increment'])
             price = sell.price.quantize(quote_increment)
             post_only = market_info['post_only']
-            order = place_limit_order(self.client, sell.market, side='sell',
-                                      price=str(price),
-                                      size=str(sell.size),
-                                      time_in_force='GTC',
-                                      stp='co',
-                                      post_only=post_only)
+            order = self.client.retryable_limit_order(sell.market,
+                                                      side='sell',
+                                                      price=str(price),
+                                                      size=str(
+                                                          sell.size),
+                                                      time_in_force='GTC',
+                                                      stp='co',
+                                                      post_only=post_only)
             if 'id' not in order:
                 next_generation.append(sell)
                 logger.debug(f"Place order error message {order}")
@@ -610,29 +604,27 @@ class PortfolioManager:
                 state = state.previous_state
             self.counter.decrement()
 
-    @retry(requests.RequestException, tries=5, delay=15)
     def set_tick_variables(self) -> None:
         self.set_portfolio_available_funds()
         self.prices = self.price_indicator.compute().map(Decimal)
         self.scores = self.score_indicator.compute()
-        self.market_info = {product['id']: product for product in
-                            self.client.get_products()}
+        self.set_market_info()
         self.tick_time, self.orders = self.tracker.barrier_snapshot()
         self.set_fee()
 
-    @retry((requests.RequestException, KeyError), tries=5, delay=5)
+    def set_market_info(self):
+        self.market_info = {product['id']: product for product in
+                            self.client.get_products()}
+
     def set_fee(self):
-        send_message = getattr(self.client, '_send_message')
-        fee_info = send_message('GET', '/fees')
+        fee_info = self.client.get_fees()
         self.taker_fee = Decimal(fee_info['taker_fee_rate'])
         self.maker_fee = Decimal(fee_info['maker_fee_rate'])
 
-    @retry(requests.RequestException, tries=5, delay=15)
     def set_portfolio_available_funds(self):
         usd_account = self.client.get_account(self.usd_account_id)
         self.portfolio_available_funds = Decimal(usd_account['available'])
 
-    @retry(requests.RequestException, tries=5, delay=15)
     def shutdown(self) -> None:
         logger.info(f"Shutting down...")
         self.client.cancel_all()
