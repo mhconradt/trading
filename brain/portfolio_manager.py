@@ -625,9 +625,22 @@ class PortfolioManager:
         usd_account = self.client.get_account(self.usd_account_id)
         self.portfolio_available_funds = Decimal(usd_account['available'])
 
-    def shutdown(self) -> None:
+    def liquidate(self) -> None:
+        for account in self.client.get_accounts():
+            if account['currency'] == 'USD':
+                continue
+            if not Decimal(account['available']):
+                continue
+            market = f"{account['currency']}-USD"
+            self.client.retryable_market_order(market,
+                                               side='sell',
+                                               size=account['available'])
+
+    def shutdown(self, liquidate: bool = True) -> None:
         logger.info(f"Shutting down...")
         self.client.cancel_all()
+        if liquidate:
+            self.liquidate()
 
     def initialize(self) -> None:
         self.client.cancel_all()
