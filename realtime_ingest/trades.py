@@ -105,7 +105,7 @@ class TradesWebsocketClient(cbpro.WebsocketClient):
         if not self.replayed_missed_tasks:
             if all_caught_up:
                 print('replaying')
-                replay.replay("trades", self.last_checkpoint,
+                replay.replay("matches", self.last_checkpoint,
                               self.checkpoint_timestamp)
                 self.replayed_missed_tasks = True
 
@@ -125,7 +125,7 @@ def main() -> None:
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG,
                              bucket="trading")
-    sink = BatchingSink(16, sink)
+    sink = BatchingSink(1024, sink)
     while True:
         trade_client = TradesWebsocketClient(sink, watermarks,
                                              products=products)
