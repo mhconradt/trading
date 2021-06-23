@@ -25,20 +25,21 @@ from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import get_server_time, AuthenticatedClient
 from indicators import InstantIndicator
 
-# TODO: Limit as percentage of market trailing volume
-
 logger = logging.getLogger(__name__)
 
 
 class PortfolioManager:
     def __init__(self, client: AuthenticatedClient,
                  price_indicator: InstantIndicator,
-                 score_indicator: InstantIndicator, stop_loss: SimpleStopLoss,
+                 volume_indicator: InstantIndicator,
+                 score_indicator: InstantIndicator,
                  cool_down: VolatilityCoolDown,
-                 market_blacklist: t.Container[str]):
+                 market_blacklist: t.Container[str],
+                 stop_loss: SimpleStopLoss):
         self.initialized = False
         self.client = client
         self.price_indicator = price_indicator
+        self.volume_indicator = volume_indicator
         self.score_indicator = score_indicator
         accounts = self.client.get_accounts()
         self.usd_account_id = [account['id'] for account in accounts if
@@ -48,7 +49,8 @@ class PortfolioManager:
         self.min_position_size = Decimal('10')
         self.max_positions = 100
 
-        self.max_position_fraction = Decimal('0.3')
+        self.pop_limit = Decimal('0.25')
+        self.pov_limit = Decimal('0.1')
 
         self.counter = PositionCounter()
 
@@ -60,6 +62,7 @@ class PortfolioManager:
         self.orders: t.Optional[t.Dict[str, dict]] = None
         self.portfolio_available_funds: t.Optional[Decimal] = None
         self.prices: t.Optional[Series] = None
+        self.volume: t.Optional[Series] = None
         self.scores: t.Optional[Series] = None
         self.market_info: t.Optional[t.Dict[str, dict]] = None
         self.taker_fee: t.Optional[Decimal] = None
@@ -100,38 +103,65 @@ class PortfolioManager:
         total_size = quote_sizes.sum()
         return total_size + self.portfolio_available_funds
 
-    def calculate_market_quote_sizes(self):
+    def calculate_market_quote_sizes(self) -> pd.Series:
         return self.calculate_market_base_sizes() * self.prices
 
     def calculate_spending_limits(self) -> pd.Series:
+        """
+        Calculate spending limits based on position limits.
+        """
         size_limits = self.calculate_size_limits()
-        spend_limit = self.compute_size_limits_remaining(size_limits)
-        return spend_limit.map(Decimal)
-
-    def compute_size_limits_remaining(self, size_limits):
         current_sizes = self.calculate_market_quote_sizes()
-        size_limit_remaining = size_limits - current_sizes
-        remaining = pd.DataFrame({'PoP': size_limit_remaining}).min(axis=1)
+        remaining = size_limits - current_sizes
         min_limit = Decimal('0')
-        spend_limit = remaining.where(remaining >= min_limit, min_limit)
-        return spend_limit
+        # if a position price goes up then remaining could be negative
+        spending_limits = remaining.where(remaining >= min_limit, min_limit)
+        return spending_limits.map(Decimal)
 
-    def calculate_size_limits(self):
-        aum_size_limits = self.calculate_aum_size_limits()
-        # TODO: PoV limit
-        size_limits = DataFrame({'aum': aum_size_limits}).min(axis=1)
-        return size_limits
+    def calculate_size_limits(self) -> pd.Series:
+        """
+        Calculate the position size limits for each market.
+        Does not depend on the actual position sizes.
+        """
+        aum_size_limit = self.calculate_aum_size_limit()
+        pov_size_limits = self.calculate_volume_size_limits()
+        mv_limits = DataFrame({'aum': aum_size_limit, 'pov': pov_size_limits})
+        return mv_limits.min(axis=1).map(Decimal)
 
-    def calculate_aum_size_limits(self):
+    def calculate_volume_size_limits(self) -> pd.Series:
+        """
+        Calculate percentage-of-volume based position size limit.
+        Ensures size of the position is below a fraction of volume.
+        This fraction is configured using the pov_limit attribute.
+        :return: the volume-based size limits
+        """
+        base_size_limits = self.volume * self.pov_limit
+        quote_size_limits = self.prices * base_size_limits
+        return quote_size_limits
+
+    def calculate_aum_size_limit(self) -> Decimal:
+        """
+        This calculates the quote size limit for any position, based on AUM.
+        :return: the quote size limit of a position
+        """
         aum = self.calculate_aum()
-        aum_limit = aum * self.max_position_fraction
+        aum_limit = aum * self.pop_limit
         return aum_limit
 
-    def apply_size_limits(self, weights, spending_limit):
-        weight_limit = self.calculate_spending_limits() / spending_limit
-        weights = DataFrame({'weight': weights,
-                             'limit': weight_limit
-                             }).fillna(Decimal('0')).min(axis=1)
+    def apply_size_limits(self, weights: pd.Series,
+                          spending_limit: Decimal) -> pd.Series:
+        """
+        Applies position size limits to the weights.
+        Ensures the returned weights would not cause exceeding position limits.
+        :param weights: the initial weights
+        :param spending_limit: the amount we can spend
+        :return:
+        """
+        weight_limits = self.calculate_spending_limits() / spending_limit
+        markets = weights.index.intersection(weight_limits.index)
+        weights = weights.loc[markets]
+        weight_limits = weight_limits.loc[markets]
+        weights = weights.where(weights < weight_limits, weight_limits)
         weights = weights[weights.notna() & weights.gt(0.)]
         return weights
 
@@ -667,6 +697,7 @@ class PortfolioManager:
     def set_tick_variables(self) -> None:
         self.set_portfolio_available_funds()
         self.prices = self.price_indicator.compute().map(Decimal)
+        self.volume = self.volume_indicator.compute().map(Decimal)
         self.scores = self.score_indicator.compute()
         self.set_market_info()
         self.tick_time, self.orders = self.tracker.barrier_snapshot()

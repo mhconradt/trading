@@ -8,7 +8,7 @@ from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import AuthenticatedClient
-from indicators import Ticker, PessimisticMoonShot
+from indicators import Ticker, PessimisticMoonShot, TrailingVolume
 from settings import influx_db as influx_db_settings, \
     coinbase as coinbase_settings, portfolio as portfolio_settings
 
@@ -24,6 +24,8 @@ def main() -> None:
     moonshot = PessimisticMoonShot(client, portfolio_settings.EXCHANGE,
                                    max_lag=timedelta(seconds=15),
                                    downturn_window=timedelta(hours=6))
+    volume = TrailingVolume(client, portfolio_settings.EXCHANGE,
+                            start=-timedelta(minutes=30))
     ticker = Ticker(client, portfolio_settings.EXCHANGE,
                     start=timedelta(minutes=-5))
     coinbase = AuthenticatedClient(key=coinbase_settings.API_KEY,
@@ -34,9 +36,11 @@ def main() -> None:
                                stop_loss=portfolio_settings.STOP_LOSS)
     cool_down = VolatilityCoolDown(period=timedelta(minutes=5))
     manager = PortfolioManager(coinbase, price_indicator=ticker,
-                               score_indicator=moonshot, stop_loss=stop_loss,
+                               volume_indicator=volume,
+                               score_indicator=moonshot,
                                cool_down=cool_down,
-                               market_blacklist={'USDT-USD', 'DAI-USD'})
+                               market_blacklist={'USDT-USD', 'DAI-USD'},
+                               stop_loss=stop_loss)
     try:
         manager.run()
     finally:

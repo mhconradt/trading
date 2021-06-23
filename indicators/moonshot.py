@@ -46,6 +46,7 @@ class PessimisticMoonShot(MoonShot):
                  downturn_window: timedelta,
                  max_lag: timedelta):
         super().__init__(client, exchange, max_lag)
+        # TODO: Use rolling downturn window
         self.candles = CandleSticks(client, exchange, downturn_window,
                                     start=-(2 * downturn_window + max_lag),
                                     stop=timedelta(0))

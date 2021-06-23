@@ -43,16 +43,15 @@ class CandleSticks:
 
 
 def main(influx: InfluxDBClient):
-    _start = time.time()
-    sticks = CandleSticks(influx, 'coinbasepro', timedelta(hours=6),
-                          timedelta(hours=-12))
-    print(sticks.compute())
-    print(time.time() - _start)
+    candles = CandleSticks(influx, 'coinbasepro', timedelta(hours=6),
+                           timedelta(hours=-12))
+    values = candles.compute()
+    print(values)
+    print(values.volume.groupby(level='market').sum())
 
 
 if __name__ == '__main__':
     from settings import influx_db as influx_db_settings
-    import time
 
     influx_client = InfluxDBClient(influx_db_settings.INFLUX_URL,
                                    influx_db_settings.INFLUX_TOKEN,
