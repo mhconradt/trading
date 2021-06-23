@@ -122,33 +122,26 @@ class PortfolioManager:
         cooling_down = filter(self.cool_down.cooling_down, scores.index)
         allowed = scores.index.difference(cooling_down)
         allowed = allowed.difference(self.blacklist)
-        if not len(allowed):
-            return nil_weights
         scores = scores.loc[allowed]
         positive_scores = scores[scores.notna() & scores.gt(0.)].map(Decimal)
         if not len(positive_scores):
             return nil_weights
         ranked_scores = positive_scores.sort_values(ascending=False)
-        cum_norm_scores = ranked_scores / ranked_scores.cumsum()
-        spend_amount = cum_norm_scores * spending_limit
-        spend_limit = self.independent_spending_limit()
-        spend_amount = DataFrame({'amount': spend_amount,
-                                  'limit': spend_limit}).min(axis=1).map(
-            Decimal)
-        scores = spend_amount.sort_values(ascending=False)
-        cum_norm_scores = scores / scores.cumsum()
-        spend_amount = cum_norm_scores * self.min_position_size
-        hypothetical_sizes_ok = spend_amount >= self.min_position_size
+        cumulative_normalized_scores = ranked_scores / ranked_scores.cumsum()
+        hypothetical_sizes = cumulative_normalized_scores * spending_limit
+        hypothetical_sizes_ok = hypothetical_sizes >= self.min_position_size
         min_position_size_limit = int(hypothetical_sizes_ok.sum())
         position_count_limit = self.max_positions - self.counter.count
         limit = min(min_position_size_limit, position_count_limit)
         if not limit:
             return nil_weights
-        final_scores = cum_norm_scores.iloc[:limit]
-        # weights <- remaining $ size <- current $ size <- size total * price
+        final_scores = cumulative_normalized_scores.iloc[:limit]
         weights = final_scores / final_scores.sum()
+        weight_limit = self.independent_spending_limit() / spending_limit
+        weights = DataFrame({'weight': weights,
+                             'limit': weight_limit}).min(axis=1)
+        weights = weights[weights.notna() & weights.gt(0.)]
         logger.debug(weights)
-        # if we wanted to test: return nil_weights
         return weights
 
     def queue_buys(self) -> None:
