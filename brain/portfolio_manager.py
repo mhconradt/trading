@@ -1,3 +1,4 @@
+import itertools as it
 import logging
 import time
 import typing as t
@@ -43,8 +44,6 @@ class PortfolioManager:
         self.usd_account_id = [account['id'] for account in accounts if
                                account['currency'] == 'USD'][0]
         self.tracker = SyncCoinbaseOrderTracker(client)
-        # a buy is allocated only until it receives a server response
-        self.allocations = Decimal('0')
         # avoid congesting system with dozens of tiny positions
         self.min_position_size = Decimal('10')
         self.max_positions = 100
@@ -52,8 +51,6 @@ class PortfolioManager:
         self.max_position_fraction = Decimal('0.3')
 
         self.counter = PositionCounter()
-
-        self.position_sizes = defaultdict(lambda: Decimal('0'))
 
         self.buy_age_limit = timedelta(minutes=1)
         self.sell_age_limit = timedelta(minutes=5)
@@ -85,32 +82,58 @@ class PortfolioManager:
         self.realized_gains = Decimal('0')
         self.blacklist = market_blacklist
 
-    @property
-    def volume_totals(self) -> pd.Series:
-        return pd.Series({market: self.position_sizes[market] for market in
-                          self.market_info})
+    def calculate_market_base_sizes(self) -> pd.Series:
+        sizes = defaultdict(lambda: Decimal('0'))
+        positions = it.chain(self.desired_limit_buys, self.pending_limit_buys,
+                             self.pending_cancel_buys, self.active_positions,
+                             self.desired_limit_sells,
+                             self.desired_market_sells,
+                             self.pending_limit_sells,
+                             self.pending_market_sells,
+                             self.pending_cancel_sells, self.sells)
+        for position in positions:
+            sizes[position.market] += position.size
+        return Series({market: sizes[market] for market in self.market_info})
 
-    @property
-    def size_totals(self) -> pd.Series:
-        return self.volume_totals * self.prices
+    def calculate_aum(self) -> Decimal:
+        quote_sizes = self.calculate_market_quote_sizes()
+        total_size = quote_sizes.sum()
+        return total_size + self.portfolio_available_funds
 
-    @property
-    def aum(self) -> Decimal:
-        return self.size_totals.sum() + self.portfolio_available_funds
+    def calculate_market_quote_sizes(self):
+        return self.calculate_market_base_sizes() * self.prices
 
-    @property
-    def budget(self) -> Decimal:
-        return self.portfolio_available_funds - self.allocations
+    def calculate_spending_limits(self) -> pd.Series:
+        size_limits = self.calculate_size_limits()
+        spend_limit = self.compute_size_limits_remaining(size_limits)
+        return spend_limit.map(Decimal)
 
-    def percentage_of_aum_spending_limit(self) -> pd.Series:
-        current_sizes = self.size_totals
-        dollar_limit = self.aum * self.max_position_fraction
-        remaining = dollar_limit - current_sizes
-        return remaining.where(remaining >= Decimal('0'), Decimal('0'))
+    def compute_size_limits_remaining(self, size_limits):
+        current_sizes = self.calculate_market_quote_sizes()
+        size_limit_remaining = size_limits - current_sizes
+        remaining = pd.DataFrame({'PoP': size_limit_remaining}).min(axis=1)
+        min_limit = Decimal('0')
+        spend_limit = remaining.where(remaining >= min_limit, min_limit)
+        return spend_limit
 
-    def independent_spending_limit(self) -> pd.Series:
-        limits = pd.DataFrame({'PoP': self.percentage_of_aum_spending_limit()})
-        return limits.min(axis=1).map(Decimal)
+    def calculate_size_limits(self):
+        aum_size_limits = self.calculate_aum_size_limits()
+        # TODO: PoV limit
+        size_limits = DataFrame({'aum': aum_size_limits}).min(axis=1)
+        return size_limits
+
+    def calculate_aum_size_limits(self):
+        aum = self.calculate_aum()
+        aum_limit = aum * self.max_position_fraction
+        return aum_limit
+
+    def apply_size_limits(self, weights, spending_limit):
+        weight_limit = self.calculate_spending_limits() / spending_limit
+        weights = DataFrame({'weight': weights,
+                             'limit': weight_limit
+                             }).fillna(Decimal('0')).min(axis=1)
+        weights = weights[weights.notna() & weights.gt(0.)]
+        return weights
 
     def compute_buy_weights(self, scores: Series,
                             spending_limit: Decimal) -> Series:
@@ -122,6 +145,8 @@ class PortfolioManager:
         cooling_down = filter(self.cool_down.cooling_down, scores.index)
         allowed = scores.index.difference(cooling_down)
         allowed = allowed.difference(self.blacklist)
+        if not len(allowed):
+            return nil_weights
         scores = scores.loc[allowed]
         positive_scores = scores[scores.notna() & scores.gt(0.)].map(Decimal)
         if not len(positive_scores):
@@ -137,10 +162,7 @@ class PortfolioManager:
             return nil_weights
         final_scores = cumulative_normalized_scores.iloc[:limit]
         weights = final_scores / final_scores.sum()
-        weight_limit = self.independent_spending_limit() / spending_limit
-        weights = DataFrame({'weight': weights,
-                             'limit': weight_limit}).min(axis=1)
-        weights = weights[weights.notna() & weights.gt(0.)]
+        weights = self.apply_size_limits(weights, spending_limit)
         logger.debug(weights)
         return weights
 
@@ -154,7 +176,7 @@ class PortfolioManager:
         Don't queue if would put market above market_percentage_limit.
         Don't queue if would violate volatility cooldown.
         """
-        starting_budget = self.budget  # this computed property changes in loop
+        starting_budget = self.portfolio_available_funds
         spending_limit = starting_budget / (Decimal('1') + self.taker_fee)
         weights = self.compute_buy_weights(self.scores, spending_limit)
         decimal_weights = weights.map(Decimal)
@@ -172,8 +194,6 @@ class PortfolioManager:
                                   previous_state=previous_state,
                                   state_change=f'buy target {weight:.2f}')
             self.counter.increment()
-            self.position_sizes[market] += size
-            self.allocations += allocation
             logger.info(f"{buy}")
             self.desired_limit_buys.appendleft(buy)
         return None
@@ -192,12 +212,10 @@ class PortfolioManager:
             info = self.market_info[market]
             if info['status'] != 'online' or info['trading_disabled']:
                 self.counter.decrement()
-                self.position_sizes[market] -= buy.size
                 continue
                 # could probably use post_only in the order flags
             elif info['cancel_only'] or info['post_only']:
                 self.counter.decrement()
-                self.position_sizes[market] -= buy.size
                 continue
             price = buy.price.quantize(Decimal(info['quote_increment']),
                                        rounding='ROUND_DOWN')
@@ -206,7 +224,6 @@ class PortfolioManager:
             min_size = Decimal(info['base_min_size'])
             if size < min_size:
                 self.counter.decrement()
-                self.position_sizes[market] -= buy.size
                 continue
             max_size = Decimal(info['base_max_size'])
             size = min(size, max_size)
@@ -216,10 +233,8 @@ class PortfolioManager:
                                                       time_in_force='GTC',
                                                       stp='cn')
             self.cool_down.bought(market)
-            self.allocations -= buy.allocation  # we tried
             if 'id' not in order:
                 logger.warning(order)
-                self.position_sizes[market] -= buy.size
                 self.counter.decrement()
                 continue  # This means there was a problem with the order
             created_at = dateutil.parser.parse(order['created_at'])
@@ -258,7 +273,6 @@ class PortfolioManager:
                 # we don't do anything about this
                 self.tracker.forget(order_id)
                 self.counter.decrement()
-                self.position_sizes[pending_buy.market] -= pending_buy.size
                 continue
             order = self.orders[order_id]
             status = order['status']
@@ -649,7 +663,6 @@ class PortfolioManager:
                     break
                 state = state.previous_state
             self.counter.decrement()
-            self.position_sizes[sell.market] -= sell.size
 
     def set_tick_variables(self) -> None:
         self.set_portfolio_available_funds()
@@ -706,7 +719,6 @@ class PortfolioManager:
                 continue
             price = self.prices[market]
             self.counter.increment()
-            self.position_sizes[market] += balance
             tail = Download(self.counter.monotonic_count, market=market)
             position = ActivePosition(price, balance, fees=Decimal('0'),
                                       market=market, start=self.tick_time,
@@ -746,6 +758,8 @@ class PortfolioManager:
         self.check_pending_buys()
         self.check_desired_buys()
 
+        # NOTE: Assumption is all allocations reflected in available funds
+        # This implies there are no desired buys during queue_buys.
         self.set_portfolio_available_funds()
         self.queue_buys()
 
