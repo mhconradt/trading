@@ -44,7 +44,7 @@ def main() -> None:
     try:
         manager.run()
     finally:
-        manager.shutdown()
+        manager.shutdown(liquidate=False)
     sys.exit(1)
 
 

@@ -85,6 +85,10 @@ class PortfolioManager:
         self.realized_gains = Decimal('0')
         self.blacklist = market_blacklist
 
+    @property
+    def transaction_cost_estimate(self) -> Decimal:
+        return (Decimal('1') + self.taker_fee) ** 2 - Decimal('1')
+
     def calculate_market_base_sizes(self) -> pd.Series:
         sizes = defaultdict(lambda: Decimal('0'))
         positions = it.chain(self.desired_limit_buys, self.pending_limit_buys,
@@ -178,7 +182,9 @@ class PortfolioManager:
         if not len(allowed):
             return nil_weights
         scores = scores.loc[allowed]
-        positive_scores = scores[scores.notna() & scores.gt(0.)].map(Decimal)
+        positive_scores = scores[scores.notna()].map(Decimal)
+        threshold = self.transaction_cost_estimate
+        positive_scores = positive_scores[scores.gt(threshold)]
         if not len(positive_scores):
             return nil_weights
         ranked_scores = positive_scores.sort_values(ascending=False)
@@ -410,7 +416,7 @@ class PortfolioManager:
                                                        size=str(sell.size))
             if 'id' not in order:
                 next_generation.append(sell)  # neanderthal retry
-                logger.warning(f"Place order error message {order}")
+                logger.warning(f"Place order error message {order} {sell}")
                 continue
             order_id = order['id']
             self.tracker.remember(order_id)
@@ -506,7 +512,7 @@ class PortfolioManager:
                                                       post_only=post_only)
             if 'id' not in order:
                 next_generation.append(sell)
-                logger.debug(f"Place order error message {order}")
+                logger.debug(f"Place order error message {order} {sell}")
                 continue
             order_id = order['id']
             self.tracker.remember(order_id)
