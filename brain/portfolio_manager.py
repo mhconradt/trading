@@ -182,9 +182,9 @@ class PortfolioManager:
         if not len(allowed):
             return nil_weights
         scores = scores.loc[allowed]
-        positive_scores = scores[scores.notna()].map(Decimal)
-        threshold = self.transaction_cost_estimate
-        positive_scores = positive_scores[scores.gt(threshold)]
+        threshold = self.stop_loss.take_profit - Decimal('1')
+        notna_scores = scores[scores.notna()]
+        positive_scores = notna_scores[notna_scores.gt(threshold)].map(Decimal)
         if not len(positive_scores):
             return nil_weights
         ranked_scores = positive_scores.sort_values(ascending=False)
@@ -295,7 +295,8 @@ class PortfolioManager:
         """
         next_generation: t.List[PendingLimitBuy] = []  # Word to Bob
         for pending_buy in self.pending_limit_buys:
-            if self.market_info[pending_buy.market]['trading_disabled']:
+            market_info = self.market_info[pending_buy.market]
+            if market_info['trading_disabled']:
                 next_generation.append(pending_buy)
                 continue
             order_id = pending_buy.order_id
@@ -316,7 +317,11 @@ class PortfolioManager:
             if status in {'open', 'pending', 'active'}:
                 server_age = self.tick_time - pending_buy.created_at
                 time_limit_expired = server_age > self.buy_age_limit
-                if time_limit_expired:
+                filled_size = Decimal(order['filled_size'])
+                min_size = Decimal(market_info['base_min_size'])
+                # can't sell if filled_size < min_size
+                if time_limit_expired and not Decimal(
+                        '0') < filled_size < min_size:
                     try:
                         self.client.cancel_order(order_id)
                     except requests.RequestException:
