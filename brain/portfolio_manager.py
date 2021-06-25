@@ -97,10 +97,7 @@ class PortfolioManager:
         positions = it.chain(self.desired_limit_buys, self.pending_limit_buys,
                              self.pending_cancel_buys, self.active_positions,
                              self.desired_limit_sells,
-                             self.desired_market_sells,
-                             self.pending_limit_sells,
-                             self.pending_market_sells,
-                             self.pending_cancel_sells, self.sells)
+                             self.desired_market_sells)
         for position in positions:
             sizes[position.market] += position.size
         return Series({market: sizes[market] for market in self.market_info})
