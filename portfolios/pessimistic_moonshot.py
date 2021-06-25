@@ -1,4 +1,5 @@
 import logging
+import signal
 import sys
 from datetime import timedelta
 
@@ -37,14 +38,15 @@ def main() -> None:
     cool_down = VolatilityCoolDown(period=timedelta(minutes=5))
     manager = PortfolioManager(coinbase, price_indicator=ticker,
                                volume_indicator=volume,
-                               score_indicator=moonshot,
-                               cool_down=cool_down,
+                               score_indicator=moonshot, cool_down=cool_down,
                                market_blacklist={'USDT-USD', 'DAI-USD'},
-                               stop_loss=stop_loss)
+                               stop_loss=stop_loss,
+                               liquidate_on_shutdown=True)
+    signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()
     finally:
-        manager.shutdown(liquidate=False)
+        manager.shutdown()
     sys.exit(1)
 
 

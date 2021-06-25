@@ -34,8 +34,8 @@ class PortfolioManager:
                  volume_indicator: InstantIndicator,
                  score_indicator: InstantIndicator,
                  cool_down: VolatilityCoolDown,
-                 market_blacklist: t.Container[str],
-                 stop_loss: SimpleStopLoss):
+                 market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
+                 liquidate_on_shutdown: bool):
         self.initialized = False
         self.client = client
         self.price_indicator = price_indicator
@@ -84,6 +84,9 @@ class PortfolioManager:
         self.stop_loss = stop_loss
         self.realized_gains = Decimal('0')
         self.blacklist = market_blacklist
+
+        self.liquidate_on_shutdown = liquidate_on_shutdown
+        self.stop = False
 
     @property
     def transaction_cost_estimate(self) -> Decimal:
@@ -738,13 +741,17 @@ class PortfolioManager:
                                                side='sell',
                                                size=account['available'])
 
-    def shutdown(self, liquidate: bool = True) -> None:
+    def shutdown(self) -> None:
         logger.info(f"Shutting down...")
         self.client.cancel_all()
-        if liquidate:
+        if self.liquidate_on_shutdown:
             self.liquidate()
+        self.stop = True
 
     def initialize(self) -> None:
+        n = 15
+        logger.info(f"Waiting {n} seconds to start trading...")
+        time.sleep(n)
         self.client.cancel_all()
         self.initialize_active_positions()
 
@@ -772,7 +779,7 @@ class PortfolioManager:
     def run(self) -> t.NoReturn:
         self.set_tick_variables()
         last_tick = get_server_time()
-        while True:
+        while not self.stop:
             iteration_start = time.time()
             self.set_tick_variables()
             if not self.initialized:
