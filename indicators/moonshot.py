@@ -46,20 +46,17 @@ class MoonShot:
 
 class PessimisticMoonShot(MoonShot):
     def __init__(self, client: InfluxDBClient, exchange: str,
-                 downturn_window: timedelta,
                  max_lag: timedelta):
         super().__init__(client, exchange, max_lag)
-        # TODO: Use rolling downturn window
-        self.candles = CandleSticks(client, exchange, downturn_window,
-                                    start=-(2 * downturn_window + max_lag),
-                                    stop=timedelta(0))
+        self.long_mom = Momentum(client, exchange,
+                                 frequency=timedelta(hours=1),
+                                 start=timedelta(hours=-1),
+                                 span=6)
         self.ticker = Ticker(client, exchange, start=timedelta(minutes=-1),
                              stop=timedelta(0))
 
     def compute(self) -> pd.Series:
-        closes = self.candles.compute().close.unstack('market')
-        most_recent_price = self.ticker.compute()
+        long_mom = self.long_mom.compute().iloc[-1]
         naive_scores = super(PessimisticMoonShot, self).compute()
-        last_close = closes.iloc[0]
-        up = (most_recent_price - last_close) > 0.
+        up = long_mom > 0.
         return naive_scores.where(up, 0.)

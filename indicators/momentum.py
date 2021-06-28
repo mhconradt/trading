@@ -9,8 +9,7 @@ from indicators.ticker import Ticker
 
 class Momentum:
     def __init__(self, db: InfluxDBClient, exchange: str, frequency: timedelta,
-                 start: timedelta,
-                 stop=timedelta(0)):
+                 start: timedelta, stop=timedelta(0)):
         self.db = db
         self.frequency = frequency
         self.exchange = exchange
@@ -23,7 +22,7 @@ class Momentum:
                       'freq': self.frequency,
                       'start': self.start - self.frequency,
                       'stop': self.stop,
-                      'duration': 1 * self.frequency}
+                      'duration': self.frequency}
         df = query_api.query_data_frame("""
             at = from(bucket: "candles")
             |> range(start: start, stop: stop)
@@ -51,22 +50,21 @@ class Momentum:
 
 class IncrementalMomentum:
     def __init__(self, db: InfluxDBClient, exchange: str, frequency: timedelta,
-                 start: timedelta,
-                 stop=timedelta(0)):
+                 start: timedelta, stop=timedelta(0), span: int = 1):
         self.db = db
         self.frequency = frequency
         self.exchange = exchange
         self.start = start
         self.stop = stop
         self.ticker = Ticker(db, exchange)
+        self.span = span
 
     def compute(self) -> pd.DataFrame:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
-                      'start': self.start - self.frequency,
-                      'stop': self.stop,
-                      'duration': 1 * self.frequency}
+                      'start': self.start - self.span * self.frequency,
+                      'stop': self.stop}
         df = query_api.query_data_frame("""
             at = from(bucket: "candles")
             |> range(start: start, stop: stop)
@@ -82,14 +80,14 @@ class IncrementalMomentum:
         close = df['_value'].unstack(0)
         ticker = self.ticker.compute()
         closes = close.append(ticker)
-        return (closes / closes.shift(1)) - 1.
+        return (closes / closes.shift(self.span)).iloc[self.span:] - 1.
 
 
 def main(influx: InfluxDBClient):
-    mom = Momentum(influx, 'coinbasepro',
-                   frequency=timedelta(minutes=5),
-                   start=timedelta(minutes=-30) - timedelta(seconds=15),
-                   stop=timedelta(0))
+    mom = IncrementalMomentum(influx, 'coinbasepro',
+                              frequency=timedelta(minutes=5),
+                              start=timedelta(minutes=-30) - timedelta(seconds=15),
+                              stop=timedelta(0))
     print(mom.compute()['NKN-USD'])
 
 
