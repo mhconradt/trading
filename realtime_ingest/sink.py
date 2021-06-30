@@ -1,7 +1,10 @@
 import typing as t
 from abc import ABC, abstractmethod
+from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal
 
+import dateutil.parser
 from influxdb_client import Point
 from influxdb_client.client.write_api import WriteApi
 
@@ -52,16 +55,26 @@ class InfluxDBTradeSink(RecordSink):
     def __init__(self, exchange: str, writer: WriteApi, *args, **kwargs):
         self.exchange = exchange
         self.point_sink = InfluxDBPointSink(writer, *args, **kwargs)
+        self.product_timestamps = dict()
+        self.product_salts = defaultdict(lambda: 0)
 
     def send(self, trade: dict, /) -> None:
         point = self.build_point(trade)
         self.point_sink.send(point)
 
     def build_point(self, trade: dict) -> Point:
+        product = trade['product_id']
+        timestamp = dateutil.parser.parse(trade['time'])
+        if self.product_timestamps.get(product) == timestamp:
+            self.product_salts[product] += 1
+        else:
+            self.product_salts[product] = 0
+            self.product_timestamps[product] = timestamp
+        salt = self.product_salts[product]
         return Point("matches") \
             .tag('exchange', self.exchange) \
             .tag('market', trade['product_id']) \
-            .time(trade['time']) \
+            .time(timestamp + timedelta(microseconds=salt)) \
             .field('price', Decimal(trade['price'])) \
             .field('size', Decimal(trade['size'])) \
             .field('trade_id', int(trade['trade_id']))
