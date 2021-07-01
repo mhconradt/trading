@@ -4,22 +4,25 @@ import pandas as pd
 from influxdb_client import InfluxDBClient
 
 from exceptions import StaleDataException
-from .candles import CandleSticks
-from .momentum import IncrementalMomentum as Momentum
-from .ticker import Ticker
+from .momentum import IncrementalMomentum
+from .types import RangeIndicator
 
 
 class MoonShot:
     def __init__(self, client: InfluxDBClient, exchange: str,
                  max_lag: timedelta):
-        self.momentum_5m = Momentum(client, exchange,
-                                    frequency=timedelta(minutes=5),
-                                    start=timedelta(minutes=-15) - max_lag,
-                                    stop=timedelta(0))
-        self.momentum_15m = Momentum(client, exchange,
-                                     frequency=timedelta(minutes=15),
-                                     start=timedelta(minutes=-45) - max_lag,
-                                     stop=timedelta(0))
+        short_start = timedelta(minutes=-15) - max_lag
+        short_freq = timedelta(minutes=5)
+        self.momentum_5m = IncrementalMomentum(client, exchange,
+                                               frequency=short_freq,
+                                               start=short_start,
+                                               stop=timedelta(0))
+        long_start = timedelta(minutes=-45) - max_lag
+        long_freq = timedelta(minutes=15)
+        self.momentum_15m = IncrementalMomentum(client, exchange,
+                                                frequency=long_freq,
+                                                start=long_start,
+                                                stop=timedelta(0))
 
     def compute(self) -> pd.Series:
         mom_5 = self.momentum_5m.compute()
@@ -46,17 +49,12 @@ class MoonShot:
 
 class PessimisticMoonShot(MoonShot):
     def __init__(self, client: InfluxDBClient, exchange: str,
-                 max_lag: timedelta):
+                 max_lag: timedelta, long_trend: RangeIndicator):
         super().__init__(client, exchange, max_lag)
-        self.long_mom = Momentum(client, exchange,
-                                 frequency=timedelta(hours=1),
-                                 start=timedelta(hours=-1),
-                                 span=6)
-        self.ticker = Ticker(client, exchange, start=timedelta(minutes=-1),
-                             stop=timedelta(0))
+        self.long_trend = long_trend
 
     def compute(self) -> pd.Series:
-        long_mom = self.long_mom.compute().iloc[-1]
+        long_trend = self.long_trend.compute().iloc[-1]
         naive_scores = super(PessimisticMoonShot, self).compute()
-        up = long_mom > 0.
-        return naive_scores.where(up, 0.)
+        trending_up = long_trend > 0.
+        return naive_scores.where(trending_up, 0.)

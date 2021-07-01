@@ -1,5 +1,6 @@
 import itertools as it
 import logging
+import random
 import time
 import typing as t
 from collections import defaultdict, deque
@@ -23,9 +24,56 @@ from brain.position_counter import PositionCounter
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import get_server_time, AuthenticatedClient
-from indicators import InstantIndicator
+from indicators.types import InstantIndicator
 
 logger = logging.getLogger(__name__)
+
+
+def compute_l1_sell_size(size: Decimal, trend_score: float,
+                         min_size: Decimal, increment: Decimal) -> Decimal:
+    """
+    Determine the size of the position to sell.
+    This size must satisfy the following requirements:
+        1. The size must obey exchange rules.
+    :param size: the position size
+    :param trend_score: the trend score
+    :param min_size: the minimum size for an order
+    :param increment: this is the minimum increment for order sizes.
+    :return: the size to sell.
+    """
+    hold_fraction = min(0., max(1., (trend_score - 1) / -2))
+    sell_fraction = Decimal(0.1 * hold_fraction)
+    ideal = sell_fraction * size
+    obeys_increment = ideal.quantize(increment, rounding='ROUND_UP')
+    if obeys_increment < min_size:
+        # sell what you want in expectation
+        sell_probability = float(obeys_increment / min_size)
+        if random.random() < sell_probability:
+            return min_size
+        else:
+            return Decimal('0')
+    return obeys_increment
+
+
+def compute_sell_size(size: Decimal, trend_score: float,
+                      min_size: Decimal, increment: Decimal) -> Decimal:
+    """
+        Determine the size of the position to sell.
+        This size must satisfy the following requirements:
+            1. The size must obey exchange rules.
+            2. The size should ensure the remaining size can be sold.
+        :param size: the position size
+        :param trend_score: the trend score
+        :param min_size: the minimum size for an order
+        :param increment: this is the minimum increment for order sizes.
+        :return: the size to sell.
+    """
+    l1_sell_size = compute_l1_sell_size(size, trend_score, min_size,
+                                        increment)
+    if (size - l1_sell_size) < min_size:
+        return size
+    else:
+        return l1_sell_size
 
 
 class PortfolioManager:
@@ -33,14 +81,15 @@ class PortfolioManager:
                  price_indicator: InstantIndicator,
                  volume_indicator: InstantIndicator,
                  score_indicator: InstantIndicator,
-                 cool_down: VolatilityCoolDown,
+                 trend_indicator: InstantIndicator,
                  market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
-                 liquidate_on_shutdown: bool):
+                 liquidate_on_shutdown: bool, cool_down: VolatilityCoolDown):
         self.initialized = False
         self.client = client
         self.price_indicator = price_indicator
         self.volume_indicator = volume_indicator
         self.score_indicator = score_indicator
+        self.trend_indicator = trend_indicator
         accounts = self.client.get_accounts()
         self.usd_account_id = [account['id'] for account in accounts if
                                account['currency'] == 'USD'][0]
@@ -62,6 +111,7 @@ class PortfolioManager:
         self.orders: t.Optional[t.Dict[str, dict]] = None
         self.portfolio_available_funds: t.Optional[Decimal] = None
         self.prices: t.Optional[Series] = None
+        self.trends: t.Optional[Series] = None
         self.volume: t.Optional[Series] = None
         self.scores: t.Optional[Series] = None
         self.market_info: t.Optional[t.Dict[str, dict]] = None
@@ -370,24 +420,36 @@ class PortfolioManager:
         """
         next_generation: t.List[ActivePosition] = []
         for position in self.active_positions:
-            if position.market not in self.prices:
-                next_generation.append(position)
-                continue
-            price = self.prices[position.market]
-            price_paid = position.price
-            stop_loss = self.stop_loss.trigger_stop_loss(price, price_paid)
-            take_profit = self.stop_loss.trigger_take_profit(price, price_paid)
-            if stop_loss or take_profit:
-                state_change = 'stop loss' if stop_loss else 'take profit'
-                sell = DesiredLimitSell(price, position.size,
-                                        market=position.market,
-                                        previous_state=position,
-                                        state_change=state_change)
+            market = position.market
+            # this will start to unwind the position
+            if market not in self.trends:
+                self.trends.loc[market] = 0.
+            market_info = self.market_info[market]
+            min_size = Decimal(market_info['base_min_size'])
+            increment = Decimal(market_info['base_increment'])
+            sell_size = compute_sell_size(position.size,
+                                          self.trends[market],
+                                          min_size,
+                                          increment)
+            remainder = position.size - sell_size
+            if sell_size:
+                if remainder:
+                    self.counter.increment()
+                fraction = sell_size / position.size
+                state_change = f'sell {fraction:.3f}' if remainder else 'sell'
+                sell = DesiredMarketSell(sell_size,
+                                         market=market,
+                                         previous_state=position,
+                                         state_change=state_change)
                 logger.info(f"{sell}")
-                self.cool_down.sold(position.market)
-                self.desired_limit_sells.append(sell)
-            else:
+                self.desired_market_sells.append(sell)
+            if remainder == position.size:
                 next_generation.append(position)
+            elif remainder:
+                next_position = position.drawdown_clone(remainder)
+                next_generation.append(next_position)
+            else:
+                self.cool_down.sold(market)
         self.active_positions = next_generation
 
     def check_desired_market_sells(self) -> None:
@@ -710,6 +772,7 @@ class PortfolioManager:
         self.prices = self.price_indicator.compute().map(Decimal)
         self.volume = self.volume_indicator.compute().map(Decimal)
         self.scores = self.score_indicator.compute()
+        self.trends = self.trend_indicator.compute()
         self.set_market_info()
         self.tick_time, self.orders = self.tracker.barrier_snapshot()
         self.set_fee()

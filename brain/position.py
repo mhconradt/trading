@@ -120,6 +120,14 @@ class ActivePosition(PositionState):
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
+    def drawdown_clone(self, remainder: Decimal) -> "ActivePosition":
+        fraction = (self.size - remainder) / self.size
+        change = f"drawdown {fraction:.3f}"
+        # note this short circuits history of draw-downs etc.
+        return ActivePosition(self.price, remainder, self.fees, self.start,
+                              self.market, self.state_slug, change,
+                              previous_state=self.previous_state)
+
 
 @dataclass
 class DesiredMarketSell(PositionState):

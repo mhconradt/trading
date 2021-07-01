@@ -4,7 +4,7 @@ import pandas as pd
 from influxdb_client import InfluxDBClient
 
 from exceptions import StaleDataException
-from indicators.ticker import Ticker
+from indicators import Ticker
 
 
 class Momentum:

@@ -18,7 +18,7 @@ class SlidingMomentum:
             import "date"
             import "math"
             
-            offset = duration(v: int(v: date.truncate(t: now(), unit: _every)) - int(v: now()))
+            offset = duration(v: int(v: now()) - int(v: date.truncate(t: now(), unit: _every)))
             
             from(bucket: "trades")
                 |> range(start: _start)
@@ -37,10 +37,7 @@ class SlidingMomentum:
         data = query_api.query_data_frame(query, params=params,
                                           data_frame_index=['market', '_time'])
         momentum = data['_value'].unstack('market')
-        # make sure at least 1 minute of data in period
-        lower_bound = data['_start'].min() + timedelta(minutes=1)
-        upper_bound = data['_stop'].max() - timedelta(minutes=1)
-        return momentum.loc[lower_bound:upper_bound]
+        return momentum
 
 
 def present_trend(momentum: DataFrame) -> Series:
