@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
-from indicators import SlidingMomentum
+from .sliding_momentum import SlidingMomentum
 
 
 class TrendFollower:

@@ -421,11 +421,14 @@ class PortfolioManager:
         next_generation: t.List[ActivePosition] = []
         for position in self.active_positions:
             market = position.market
+            market_info = self.market_info[market]
+            min_size = Decimal(market_info['base_min_size'])
+            if position.size < min_size:
+                self.counter.decrement()
+                continue
             # this will start to unwind the position
             if market not in self.trends:
                 self.trends.loc[market] = 0.
-            market_info = self.market_info[market]
-            min_size = Decimal(market_info['base_min_size'])
             increment = Decimal(market_info['base_increment'])
             sell_size = compute_sell_size(position.size,
                                           self.trends[market],
@@ -824,7 +827,7 @@ class PortfolioManager:
             if market not in self.market_info:
                 continue
             balance = Decimal(account['balance'])
-            if not balance:
+            if balance < Decimal(self.market_info[market]['base_min_size']):
                 continue
             price = self.prices[market]
             self.counter.increment()
@@ -837,7 +840,6 @@ class PortfolioManager:
         self.active_positions = positions
 
     def run(self) -> t.NoReturn:
-        self.set_tick_variables()
         last_tick = get_server_time()
         while not self.stop:
             iteration_start = time.time()

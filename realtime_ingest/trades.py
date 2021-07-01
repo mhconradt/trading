@@ -72,8 +72,8 @@ class TradesWebsocketClient(cbpro.WebsocketClient):
         # when to trigger the replays
         self.replayed_missed_tasks = False
         self.catching_up = {market: True for market in watermarks}
-        self.last_checkpoint = 'Z'
-        self.checkpoint_timestamp = ''
+        self.checkpoint_start = 'Z'
+        self.checkpoint_end = ''
 
     def on_open(self):
         pass
@@ -96,19 +96,22 @@ class TradesWebsocketClient(cbpro.WebsocketClient):
             print(f'catching up {product} {watermark}->{trade_id}')
             gap = catchup(product, watermark, trade_id)
             for item in gap:
-                self.last_checkpoint = min(self.last_checkpoint, item['time'])
+                self.checkpoint_start = min(self.checkpoint_start,
+                                            item['time'])
                 self.sink.send(item)
             print(f'caught up {product}')
         self.sink.send(trade)
         self.watermarks[product] = trade_id
-        self.checkpoint_timestamp = max(trade['time'],
-                                        self.checkpoint_timestamp)
+        self.checkpoint_start = min(self.checkpoint_start, trade['time'])
+        self.checkpoint_end = max(trade['time'],
+                                  self.checkpoint_end)
         if not self.replayed_missed_tasks:
-            if all_caught_up:
+            if all_caught_up and self.checkpoint_start != 'Z':
                 print('replaying')
-                replay.replay("matches", self.last_checkpoint,
-                              self.checkpoint_timestamp)
+                replay.replay("matches", self.checkpoint_start,
+                              self.checkpoint_end)
                 self.replayed_missed_tasks = True
+                self.checkpoint_start = 'Z'
 
 
 def main() -> None:
