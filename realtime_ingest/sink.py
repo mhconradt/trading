@@ -1,6 +1,5 @@
 import typing as t
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
 
@@ -56,7 +55,7 @@ class InfluxDBTradeSink(RecordSink):
         self.exchange = exchange
         self.point_sink = InfluxDBPointSink(writer, *args, **kwargs)
         self.product_timestamps = dict()
-        self.product_salts = defaultdict(lambda: 0)
+        self.product_anchors = dict()
 
     def send(self, trade: dict, /) -> None:
         point = self.build_point(trade)
@@ -65,19 +64,23 @@ class InfluxDBTradeSink(RecordSink):
     def build_point(self, trade: dict) -> Point:
         product = trade['product_id']
         timestamp = dateutil.parser.parse(trade['time'])
-        if self.product_timestamps.get(product) == timestamp:
-            self.product_salts[product] += 1
-        else:
-            self.product_salts[product] = 0
+        trade_id = trade['trade_id']
+        if self.product_timestamps.get(product) != timestamp:
+            self.product_anchors[product] = trade_id
             self.product_timestamps[product] = timestamp
-        salt = self.product_salts[product]
+        anchor = self.product_anchors[product]
+        salt = trade_id - anchor
+        # salting timestamps serves two purposes:
+        # 1. Ensures trades with same timestamp are not dropped.
+        # 2. Encodes order of execution in order of timestamps.
+        # essentially mixes in some of our own magic logic sauce into the data.
         return Point("matches") \
             .tag('exchange', self.exchange) \
             .tag('market', trade['product_id']) \
             .time(timestamp + timedelta(microseconds=salt)) \
             .field('price', Decimal(trade['price'])) \
             .field('size', Decimal(trade['size'])) \
-            .field('trade_id', int(trade['trade_id']))
+            .field('trade_id', int(trade_id))
 
     def send_many(self, trades: t.Iterable[dict], /) -> None:
         points = []
