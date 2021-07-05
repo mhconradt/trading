@@ -21,7 +21,7 @@ def interval_intersection(x_lower: pd.Series, x_upper: pd.Series,
     return term0 - term1 + term2
 
 
-class Concentration:
+class TrendStability:
     def __init__(self, client: InfluxDBClient, exchange: str, periods: int,
                  frequency: timedelta):
         start = -(periods + 1) * frequency + timedelta(seconds=15)
@@ -42,11 +42,14 @@ class Concentration:
         cdl_up = cdl_close > cdl_open
         cdl_upper = cdl_close.where(cdl_up, cdl_open)
         cdl_lower = cdl_open.where(cdl_up, cdl_close)
-        i = interval_intersection(cdl_lower, cdl_upper, prd_lower, prd_upper)
-        change = (cdl_upper - cdl_lower)
-        # could better handle no price change
-        ios = (i / change).where(change != 0., 1.)
-        score = ios.unstack('market').mean()
+        # the intersection of the candle "trend" and period "trend"
+        cdl_reflected_trend = interval_intersection(cdl_lower, cdl_upper,
+                                                    prd_lower, prd_upper)
+        ranges = candles.high - candles.low
+        # the fraction of the intersection within the candle range
+        # the idea here is to reflect both short and long term trend stability
+        reflected_price_range = cdl_reflected_trend / ranges
+        score = reflected_price_range.unstack('market').mean()
         return score
 
 
@@ -60,7 +63,7 @@ if __name__ == '__main__':
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
 
-    indicator = Concentration(influx, 'coinbasepro', 5, timedelta(minutes=1))
+    indicator = TrendStability(influx, 'coinbasepro', 5, timedelta(minutes=1))
     while True:
         results = indicator.compute().sort_values()
         print(results.describe())
