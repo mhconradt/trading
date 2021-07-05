@@ -12,13 +12,13 @@ class TrendFollower:
     Detects reversal of a trend. i.e. positive turns negative.
     """
 
-    def __init__(self, client: InfluxDBClient,
-                 frequency: timedelta = timedelta(minutes=1),
-                 a: int = 1,
-                 b: int = 1, trend_sign: int = 1):
+    def __init__(self, client: InfluxDBClient, exchange: str, a: int = 1,
+                 b: int = 1, trend_sign: int = 1,
+                 frequency: timedelta = timedelta(minutes=1)):
         self.client = client
-        self.sliding_momentum = SlidingMomentum(client, frequency=frequency,
-                                                periods=a + b)
+        self.sliding_momentum = SlidingMomentum(client, exchange=exchange,
+                                                periods=a + b,
+                                                frequency=frequency)
         self.a = a
         self.b = b
         self.trend_sign = trend_sign
@@ -44,6 +44,7 @@ if __name__ == '__main__':
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
 
-    indicator = TrendFollower(influx, a=3, b=2)  # fib(4), fib(3)
+    indicator = TrendFollower(influx, 'coinbasepro', a=3,
+                              b=2)  # fib(4), fib(3)
     while True:
         print(indicator.compute())

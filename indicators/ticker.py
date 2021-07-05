@@ -47,7 +47,7 @@ if __name__ == '__main__':
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG)
 
-    ticker = Ticker(_influx, 'coinbasepro', start=timedelta(days=-1))
+    ticker = Ticker(_influx, 'coinbasepro', start=timedelta(seconds=10))
     while True:
         tickers = ticker.compute()
         print(tickers)

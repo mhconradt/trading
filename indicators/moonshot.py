@@ -5,7 +5,7 @@ from influxdb_client import InfluxDBClient
 
 from exceptions import StaleDataException
 from .momentum import IncrementalMomentum
-from .types import RangeIndicator
+from .protocols import RangeIndicator
 
 
 class MoonShot:

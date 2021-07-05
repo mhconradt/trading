@@ -6,9 +6,6 @@ from influxdb_client import InfluxDBClient
 from exceptions import StaleDataException
 
 
-# TODO: Mix pre-aggregated candlesticks with raw trade data
-
-
 class CandleSticks:
     def __init__(self, db: InfluxDBClient, exchange: str, frequency: timedelta,
                  start: timedelta,
@@ -43,11 +40,9 @@ class CandleSticks:
 
 
 def main(influx: InfluxDBClient):
-    candles = CandleSticks(influx, 'coinbasepro', timedelta(hours=6),
-                           timedelta(hours=-12))
+    candles = CandleSticks(influx, 'coinbasepro', timedelta(minutes=1),
+                           timedelta(minutes=-5))
     values = candles.compute()
-    print(values)
-    print(values.volume.groupby(level='market').sum())
 
 
 if __name__ == '__main__':

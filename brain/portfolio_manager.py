@@ -24,7 +24,7 @@ from brain.position_counter import PositionCounter
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import get_server_time, AuthenticatedClient
-from indicators.types import InstantIndicator
+from indicators.protocols import InstantIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,8 @@ def compute_l1_sell_size(size: Decimal, trend_score: float,
     :param increment: this is the minimum increment for order sizes.
     :return: the size to sell.
     """
-    hold_fraction = min(0., max(1., (trend_score - 1) / -2))
-    sell_fraction = Decimal(0.1 * hold_fraction)
+    sell_fraction = max(0., min(1., (trend_score - 1) / -2))
+    sell_fraction = Decimal(0.1 * sell_fraction)
     ideal = sell_fraction * size
     obeys_increment = ideal.quantize(increment, rounding='ROUND_UP')
     if obeys_increment < min_size:
@@ -232,7 +232,7 @@ class PortfolioManager:
         if not len(allowed):
             return nil_weights
         scores = scores.loc[allowed]
-        threshold = self.stop_loss.take_profit - Decimal('1')
+        threshold = Decimal('0.005')
         notna_scores = scores[scores.notna()]
         positive_scores = notna_scores[notna_scores.gt(threshold)].map(Decimal)
         if not len(positive_scores):

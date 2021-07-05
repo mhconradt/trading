@@ -5,15 +5,17 @@ from pandas import DataFrame, Series
 
 
 class SlidingMomentum:
-    def __init__(self, client: InfluxDBClient, frequency: timedelta,
-                 periods: int):
+    def __init__(self, client: InfluxDBClient, exchange: str, periods: int,
+                 frequency: timedelta):
+        self.exchange = exchange
         self.client = client
         self.frequency = frequency
         self.periods = periods
 
     def compute(self) -> DataFrame:
         params = {'_start': -1 * (self.periods + 1) * self.frequency,
-                  '_every': self.frequency}
+                  '_every': self.frequency,
+                  '_exchange': self.exchange}
         query = """
             import "date"
             import "math"
@@ -24,6 +26,8 @@ class SlidingMomentum:
                 |> range(start: _start)
                 |> filter(fn: (r) => r["_measurement"] == "matches")
                 |> filter(fn: (r) => r["_field"] == "price")
+                |> filter(fn: (r) => r["exchange"] == _exchange)
+                |> keep(columns: ["market", "_time", "exchange", "_value"])
                 |> window(every: _every, period: _every, offset: offset)
                 |> last()
                 |> duplicate(column: "_start", as: "_time")
@@ -56,7 +60,8 @@ if __name__ == '__main__':
 
     while True:
         start = time.time()
-        mom = SlidingMomentum(influx, timedelta(minutes=1), 5).compute()
+        mom = SlidingMomentum(influx, 'coinbasepro', 5,
+                              timedelta(minutes=1)).compute()
         trend = present_trend(mom)
         accelerating = mom.iloc[-1] > mom.iloc[-2]
         mask = (trend > 0.005) & accelerating

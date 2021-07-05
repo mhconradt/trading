@@ -4,7 +4,7 @@ import pandas as pd
 from influxdb_client import InfluxDBClient
 
 from exceptions import StaleDataException
-from .ticker import Ticker
+from indicators.ticker import Ticker
 
 
 class Momentum:
@@ -63,10 +63,11 @@ class IncrementalMomentum:
         query_api = self.db.query_api()
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
-                      'start': self.start - self.span * self.frequency,
+                      'start': self.start - self.span * self.frequency - timedelta(
+                          seconds=15),
                       'stop': self.stop}
         df = query_api.query_data_frame("""
-            at = from(bucket: "candles")
+            from(bucket: "candles")
             |> range(start: start, stop: stop)
             |> filter(fn: (r) => r["_measurement"] == "candles_${string(v: freq)}")
             |> filter(fn: (r) => r["exchange"] == exchange)

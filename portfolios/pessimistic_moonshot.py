@@ -42,8 +42,8 @@ def main() -> None:
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
     cool_down = VolatilityCoolDown(period=timedelta(minutes=5))
-    trend_follower = TrendFollower(client, frequency=timedelta(minutes=1), a=3,
-                                   b=2)
+    trend_follower = TrendFollower(client, 'coinbasepro', a=3, b=2,
+                                   frequency=timedelta(minutes=1))
     manager = PortfolioManager(coinbase, price_indicator=ticker,
                                volume_indicator=volume,
                                score_indicator=moonshot,
