@@ -9,20 +9,12 @@ from .protocols import RangeIndicator
 
 
 class MoonShot:
-    def __init__(self, client: InfluxDBClient, exchange: str,
-                 max_lag: timedelta):
-        short_start = timedelta(minutes=-15) - max_lag
-        short_freq = timedelta(minutes=5)
-        self.momentum_5m = IncrementalMomentum(client, exchange,
-                                               frequency=short_freq,
-                                               start=short_start,
-                                               stop=timedelta(0))
-        long_start = timedelta(minutes=-45) - max_lag
-        long_freq = timedelta(minutes=15)
-        self.momentum_15m = IncrementalMomentum(client, exchange,
-                                                frequency=long_freq,
-                                                start=long_start,
-                                                stop=timedelta(0))
+    def __init__(self, client: InfluxDBClient, exchange: str):
+        self.momentum_5m = IncrementalMomentum(client, exchange, periods=2,
+                                               frequency=timedelta(minutes=5))
+        self.momentum_15m = IncrementalMomentum(client, exchange, periods=2,
+                                                frequency=timedelta(
+                                                    minutes=15))
 
     def compute(self) -> pd.Series:
         mom_5 = self.momentum_5m.compute()
@@ -49,8 +41,8 @@ class MoonShot:
 
 class PessimisticMoonShot(MoonShot):
     def __init__(self, client: InfluxDBClient, exchange: str,
-                 max_lag: timedelta, long_trend: RangeIndicator):
-        super().__init__(client, exchange, max_lag)
+                 long_trend: RangeIndicator):
+        super().__init__(client, exchange)
         self.long_trend = long_trend
 
     def compute(self) -> pd.Series:

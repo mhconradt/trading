@@ -47,9 +47,12 @@ if __name__ == '__main__':
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG)
 
-    ticker = Ticker(_influx, 'coinbasepro', start=timedelta(seconds=10))
-    while True:
-        tickers = ticker.compute()
-        print(tickers)
-        print(tickers[tickers.index.str.endswith('-USD')])
-        time.sleep(5)
+    ticker = Ticker(_influx, 'coinbasepro', start=timedelta(minutes=-5))
+    total = 0.
+    samples = 7
+    for i in range(samples):
+        _start = time.time()
+        values = ticker.compute()
+        print(values[values.index.str.endswith('-USD')])
+        total += time.time() - _start
+    print(total / samples)

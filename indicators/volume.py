@@ -7,11 +7,10 @@ from .candles import CandleSticks
 
 
 class TrailingVolume:
-    def __init__(self, client: InfluxDBClient, exchange: str,
-                 start: timedelta):
-        self.candles = CandleSticks(client, exchange,
-                                    frequency=timedelta(minutes=1),
-                                    start=start)
+    def __init__(self, client: InfluxDBClient, exchange: str, periods: int,
+                 frequency: timedelta):
+        self.candles = CandleSticks(client, exchange, periods=periods,
+                                    frequency=frequency)
 
     def compute(self) -> pd.Series:
         candles = self.candles.compute()

@@ -25,14 +25,13 @@ def main() -> None:
                             org=influx_db_settings.INFLUX_ORG)
     downturn_indicator = IncrementalMomentum(client,
                                              portfolio_settings.EXCHANGE,
+                                             periods=1,
                                              frequency=timedelta(hours=1),
-                                             start=timedelta(hours=-1),
                                              span=6)
     moonshot = PessimisticMoonShot(client, portfolio_settings.EXCHANGE,
-                                   max_lag=timedelta(seconds=15),
-                                   long_trend=downturn_indicator)
-    volume = TrailingVolume(client, portfolio_settings.EXCHANGE,
-                            start=-timedelta(minutes=30))
+                                   downturn_indicator)
+    volume = TrailingVolume(client, portfolio_settings.EXCHANGE, periods=15,
+                            frequency=timedelta(minutes=1))
     ticker = Ticker(client, portfolio_settings.EXCHANGE,
                     start=timedelta(minutes=-5))
     coinbase = AuthenticatedClient(key=coinbase_settings.API_KEY,

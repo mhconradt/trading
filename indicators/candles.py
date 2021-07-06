@@ -7,42 +7,54 @@ from exceptions import StaleDataException
 
 
 class CandleSticks:
-    def __init__(self, db: InfluxDBClient, exchange: str, frequency: timedelta,
-                 start: timedelta,
-                 stop=timedelta(0)):
+    def __init__(self, db: InfluxDBClient, exchange: str, periods: int,
+                 frequency: timedelta):
         self.db = db
         self.frequency = frequency
         self.exchange = exchange
-        self.start = start
-        self.stop = stop
+        self.periods = periods
 
     def compute(self) -> pd.DataFrame:
         query_api = self.db.query_api()
+        lag_toleration = timedelta(seconds=15)
+        start = -(self.periods + 1) * self.frequency + lag_toleration
+        stop = timedelta(0)
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
-                      'start': self.start,
-                      'stop': self.stop}
+                      'start': start,
+                      'stop': stop}
         # catchup mechanism for candlesticks?
         df = query_api.query_data_frame("""
             from(bucket: "candles")
             |> range(start: start, stop: stop)
             |> filter(fn: (r) => r["_measurement"] == "candles_${string(v: freq)}")
             |> filter(fn: (r) => r["exchange"] == exchange)
-            |> pivot(rowKey: ["market", "_time"], columnKey: ["_field"], valueColumn: "_value")
+            |> pivot(rowKey: ["market", "_time"], 
+                     columnKey: ["_field"], 
+                     valueColumn: "_value")
             |> yield()
         """, data_frame_index=['market', '_time'],
                                         params=parameters)
         if not len(df):
             raise StaleDataException(
-                f"No candles between {self.start} and {self.stop}"
+                f"No candles between {start} and {stop}"
             )
-        return df[['open', 'high', 'low', 'close', 'volume']]
+        candles = df[['open', 'high', 'low', 'close', 'volume']]
+        # only show data for the last n times
+        return candles.unstack('market').iloc[-self.periods:].stack('market')
 
 
 def main(influx: InfluxDBClient):
-    candles = CandleSticks(influx, 'coinbasepro', timedelta(minutes=1),
-                           timedelta(minutes=-5))
-    values = candles.compute()
+    import time
+    candles = CandleSticks(influx, 'coinbasepro', 5, timedelta(minutes=1))
+    total = 0.
+    measurements = 7
+    for i in range(measurements):
+        start = time.time()
+        values = candles.compute()
+        print(values)
+        total += time.time() - start
+    print(total / measurements)
 
 
 if __name__ == '__main__':

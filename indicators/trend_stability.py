@@ -49,17 +49,12 @@ def compute_stability_scores(candles):
 class TrendStability:
     def __init__(self, client: InfluxDBClient, exchange: str, periods: int,
                  frequency: timedelta):
-        start = -(periods + 1) * frequency + timedelta(seconds=15)
         self.periods = periods
-        self.candles = CandleSticks(client, exchange, frequency=frequency,
-                                    start=start)
-        self.analysis_mode = True
+        self.candles = CandleSticks(client, exchange, periods=self.periods,
+                                    frequency=frequency)
 
     def compute(self) -> pd.Series:
         candles = self.candles.compute()
-        level = 'market'
-        # this is necessary to ensure we have exactly n periods
-        candles = candles.unstack(level).iloc[-self.periods:].stack(level)
         score = compute_stability_scores(candles)
         return score
 
