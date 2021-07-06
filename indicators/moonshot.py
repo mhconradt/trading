@@ -40,8 +40,8 @@ class MoonShot:
         buy_mask = mom_positive & mom_increasing
         mom5_diff = this_mom5 - last_mom5
         mom15_diff = this_mom15 - last_mom15
-        mom5_estimate = (this_mom5 + last_mom5) / 2 + mom5_diff
-        mom15_estimate = (this_mom15 + last_mom15) / 2 + mom15_diff
+        mom5_estimate = last_mom5 + mom5_diff
+        mom15_estimate = last_mom15 + mom15_diff
         mom_estimate = (mom5_estimate + mom15_estimate) / 2
         scores = buy_mask * mom_estimate
         return scores

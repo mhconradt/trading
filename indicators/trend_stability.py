@@ -21,6 +21,31 @@ def interval_intersection(x_lower: pd.Series, x_upper: pd.Series,
     return term0 - term1 + term2
 
 
+# note: time period???
+
+
+def compute_stability_scores(candles):
+    prd_open = candles.open.unstack('market').bfill().iloc[0]
+    prd_close = candles.close.unstack('market').ffill().iloc[-1]
+    prd_up = prd_close > prd_open
+    prd_upper = prd_close.where(prd_up, prd_open)
+    prd_lower = prd_open.where(prd_up, prd_close)
+    cdl_open = candles.open
+    cdl_close = candles.close
+    cdl_up = cdl_close > cdl_open
+    cdl_upper = cdl_close.where(cdl_up, cdl_open)
+    cdl_lower = cdl_open.where(cdl_up, cdl_close)
+    # the intersection of the candle "trend" and period "trend"
+    cdl_reflected_trend = interval_intersection(cdl_lower, cdl_upper,
+                                                prd_lower, prd_upper)
+    ranges = candles.high - candles.low
+    # the fraction of the intersection within the candle range
+    # the idea here is to reflect both short and long term trend stability
+    reflected_price_range = cdl_reflected_trend / ranges
+    score = reflected_price_range.unstack('market').mean()
+    return score
+
+
 class TrendStability:
     def __init__(self, client: InfluxDBClient, exchange: str, periods: int,
                  frequency: timedelta):
@@ -28,28 +53,14 @@ class TrendStability:
         self.periods = periods
         self.candles = CandleSticks(client, exchange, frequency=frequency,
                                     start=start)
+        self.analysis_mode = True
 
     def compute(self) -> pd.Series:
         candles = self.candles.compute()
-        candles = candles.unstack('market').iloc[-5:].stack('market')
-        prd_open = candles.open.unstack('market').bfill().iloc[0]
-        prd_close = candles.close.unstack('market').ffill().iloc[-1]
-        prd_up = prd_close > prd_open
-        prd_upper = prd_close.where(prd_up, prd_open)
-        prd_lower = prd_open.where(prd_up, prd_close)
-        cdl_open = candles.open
-        cdl_close = candles.close
-        cdl_up = cdl_close > cdl_open
-        cdl_upper = cdl_close.where(cdl_up, cdl_open)
-        cdl_lower = cdl_open.where(cdl_up, cdl_close)
-        # the intersection of the candle "trend" and period "trend"
-        cdl_reflected_trend = interval_intersection(cdl_lower, cdl_upper,
-                                                    prd_lower, prd_upper)
-        ranges = candles.high - candles.low
-        # the fraction of the intersection within the candle range
-        # the idea here is to reflect both short and long term trend stability
-        reflected_price_range = cdl_reflected_trend / ranges
-        score = reflected_price_range.unstack('market').mean()
+        level = 'market'
+        # this is necessary to ensure we have exactly n periods
+        candles = candles.unstack(level).iloc[-self.periods:].stack(level)
+        score = compute_stability_scores(candles)
         return score
 
 
@@ -67,8 +78,8 @@ if __name__ == '__main__':
     while True:
         results = indicator.compute().sort_values()
         print(results.describe())
-        print(results.head(10))
-        print(results.tail(10))
+        print(f"LTC: {results.loc['LTC-USD']}")
+        print(f"SUSHI: {results.loc['SUSHI-USD']}")  # 16:03 to 16:07
         results.plot.hist()
         plt.show()
         time.sleep(60)
