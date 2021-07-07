@@ -1,27 +1,22 @@
 from datetime import timedelta
 
+import numpy as np
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
 from indicators.candles import CandleSticks
 
 
-# TODO: Refactor all indicators to internalize lag logic at lowest level
-
-
-def min0(x: pd.Series) -> pd.Series:
-    return x.where(x >= 0., 0.)
-
-
 def interval_intersection(x_lower: pd.Series, x_upper: pd.Series,
                           y_lower: pd.Series, y_upper: pd.Series) -> pd.Series:
     term0 = x_upper - x_lower
-    term1 = min0(x_upper - y_upper) + min0(y_lower - x_lower)
-    term2 = min0(y_lower - x_upper) + min0(x_lower - y_upper)
+    x = x_upper - y_upper
+    x1 = y_lower - x_lower
+    term1 = np.maximum(x, 0.) + np.maximum(x1, 0.)
+    x2 = y_lower - x_upper
+    x3 = x_lower - y_upper
+    term2 = np.maximum(x2, 0.) + np.maximum(x3, 0.)
     return term0 - term1 + term2
-
-
-# note: time period???
 
 
 def compute_stability_scores(candles):
