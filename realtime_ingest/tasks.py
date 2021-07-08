@@ -132,6 +132,20 @@ class TaskDefinition:
                       |> set(key: "_measurement", value: "candles_" + string(v: task.every))
                       |> set(key: "_field", value: "volume")
                       |> to(bucket: "{self.dst}")
+
+                    quote_volume = from(bucket: "{self.src}")
+                      |> range(start: -task.every)
+                      |> filter(fn: (r) => r["_measurement"] == "matches")
+                      |> filter(fn: (r) => r["_field"] == "price" or r["_field"] == "size")
+                      |> pivot(rowKey: ["_time", "market", "exchange"],
+                               columnKey: ["_field"],
+                               valueColumn: "_value")
+                      |> map(fn: (r) => {'({ r with _value: r["price"] * r["size"]})'})
+                      |> keep(columns: ["_time", "market", "_value", "exchange"])
+                      |> aggregateWindow(every: task.every, fn: sum, timeSrc: "_start")
+                      |> set(key: "_measurement", value: "candles_" + string(v: task.every))
+                      |> set(key: "_field", value: "quote_volume")
+                      |> to(bucket: "{self.dst}")
             """
         task = Task(
             flux=flux,

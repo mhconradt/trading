@@ -39,7 +39,8 @@ class CandleSticks:
             raise StaleDataException(
                 f"No candles between {start} and {stop}"
             )
-        candles = df[['open', 'high', 'low', 'close', 'volume']]
+        candles = df[
+            ['open', 'high', 'low', 'close', 'volume', 'quote_volume']]
         # only show data for the last n times
         return candles.unstack('market').iloc[-self.periods:].stack('market')
 
