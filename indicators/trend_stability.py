@@ -37,7 +37,7 @@ def compute_stability_scores(candles):
     # the fraction of the intersection within the candle range
     # the idea here is to reflect both short and long term trend stability
     reflected_price_range = cdl_reflected_trend / ranges
-    score = reflected_price_range.unstack('market').mean()
+    score = reflected_price_range.unstack('market').fillna(0.).mean()
     return score
 
 
