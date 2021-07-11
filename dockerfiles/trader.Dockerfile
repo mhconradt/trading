@@ -10,4 +10,4 @@ COPY .. .
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python3", "-m", "portfolios.pessimistic_moonshot"]
+CMD ["python3", "-m", "portfolios.trend_follower"]

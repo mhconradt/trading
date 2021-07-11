@@ -61,10 +61,35 @@ class DesiredLimitBuy(PositionState):
     price: Decimal
     size: Decimal
 
-    allocation: Decimal
-
     market: str
     state_slug: str = 'desired_limit_buy'
+
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
+
+
+@dataclass
+class DesiredMarketBuy(PositionState):
+    funds: Decimal
+    market: str
+
+    state_slug: str = 'desired_market_buy'
+
+    state_change: t.Optional[str] = field(default=None, repr=False)
+    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
+
+
+@dataclass
+class PendingMarketBuy(PositionState):
+    """
+    We ordered .size of base currency in .market for .price * .size in quote.
+    """
+    funds: Decimal
+
+    order_id: str
+    created_at: datetime
+    market: str
+    state_slug: str = 'pending_market_buy'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -226,7 +251,8 @@ class Sold(PositionState):
 __all__ = ['DesiredMarketSell', 'DesiredLimitBuy', 'DesiredLimitSell',
            'RootState', 'PendingCancelBuy', 'PendingLimitSell',
            'PendingMarketSell', 'PendingLimitBuy', 'PendingCancelLimitSell',
-           'Sold', 'PositionState', 'ActivePosition', 'Download']
+           'Sold', 'PositionState', 'ActivePosition', 'Download',
+           'PendingMarketBuy', 'DesiredMarketBuy']
 
 if __name__ == '__main__':
     root = Download(number=1, market='BTC-USD')

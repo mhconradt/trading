@@ -19,6 +19,7 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             PendingCancelBuy,
                             PendingCancelLimitSell, DesiredMarketSell,
                             PendingMarketSell,
+                            PendingMarketBuy, DesiredMarketBuy,
                             Download, RootState)
 from brain.position_counter import PositionCounter
 from brain.stop_loss import SimpleStopLoss
@@ -28,23 +29,56 @@ from indicators.protocols import InstantIndicator
 
 logger = logging.getLogger(__name__)
 
+# todo: remove cooldown / set to zero
+# todo: factor in lower latency
+# todo: expose kernels?
 
-def compute_l1_sell_size(size: Decimal, trend_score: float,
+"""
+Phase A: done
+0. Add market order functionality
+1. Set cooldown to zero
+-1: Is there a way to waterfall a position through each state in one go?
+
+Phase B:
+0. Refactor to lazily compute all indicator values from candlesticks
+    - re-factor classes to consume candles in .compute() method
+    - classes have a .required_periods property
+1. .candles added as tick variable, could be sliding or not
+2. indicator classes used in place of the tick variables
+
+Phase C:
+0. refactor active_positions to merge positions
+    - probably means removing stop_loss stuff
+1. remove state tracking functionality
+    - consumption
+    - pushing
+
+Phase D:
+0. use fibtrader as score_indicator
+1. Pin scores to moving average or something
+
+
+"""
+
+
+# starting to see opportunity for different components
+# don't even expose the indicator values
+
+
+def compute_l1_sell_size(size: Decimal, fraction: Decimal,
                          min_size: Decimal, increment: Decimal) -> Decimal:
     """
     Determine the size of the position to sell.
     This size must satisfy the following requirements:
         1. The size must obey exchange rules.
     :param size: the position size
-    :param trend_score: the trend score
+    :param fraction: the desired fraction to sell
     :param min_size: the minimum size for an order
     :param increment: this is the minimum increment for order sizes.
     :return: the size to sell.
     """
-    sell_fraction = max(0., min(1., (trend_score - 1) / -2))
-    sell_fraction = Decimal(0.1 * sell_fraction)
-    ideal = sell_fraction * size
-    obeys_increment = ideal.quantize(increment, rounding='ROUND_UP')
+    desired_size = fraction * size
+    obeys_increment = desired_size.quantize(increment, rounding='ROUND_UP')
     if obeys_increment < min_size:
         # sell what you want in expectation
         sell_probability = float(obeys_increment / min_size)
@@ -55,7 +89,7 @@ def compute_l1_sell_size(size: Decimal, trend_score: float,
     return obeys_increment
 
 
-def compute_sell_size(size: Decimal, trend_score: float,
+def compute_sell_size(size: Decimal, fraction: Decimal,
                       min_size: Decimal, increment: Decimal) -> Decimal:
     """
         Determine the size of the position to sell.
@@ -63,12 +97,12 @@ def compute_sell_size(size: Decimal, trend_score: float,
             1. The size must obey exchange rules.
             2. The size should ensure the remaining size can be sold.
         :param size: the position size
-        :param trend_score: the trend score
+        :param fraction: the desired fraction to sell
         :param min_size: the minimum size for an order
         :param increment: this is the minimum increment for order sizes.
         :return: the size to sell.
     """
-    l1_sell_size = compute_l1_sell_size(size, trend_score, min_size,
+    l1_sell_size = compute_l1_sell_size(size, fraction, min_size,
                                         increment)
     if (size - l1_sell_size) < min_size:
         return size
@@ -83,7 +117,10 @@ class PortfolioManager:
                  score_indicator: InstantIndicator,
                  trend_indicator: InstantIndicator,
                  market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
-                 liquidate_on_shutdown: bool, cool_down: VolatilityCoolDown):
+                 liquidate_on_shutdown: bool, cool_down: VolatilityCoolDown,
+                 buy_order_type: str = 'limit', sell_order_type: str = 'limit',
+                 buy_time_in_force: str = 'GTC',
+                 sell_time_in_force: str = 'GTC'):
         self.initialized = False
         self.client = client
         self.price_indicator = price_indicator
@@ -110,17 +147,38 @@ class PortfolioManager:
         self.tick_time: t.Optional[datetime] = None
         self.orders: t.Optional[t.Dict[str, dict]] = None
         self.portfolio_available_funds: t.Optional[Decimal] = None
+
+        valid_order_types = {'limit', 'market'}
+        if buy_order_type not in valid_order_types:
+            raise ValueError(f"Invalid order type {buy_order_type}")
+        self.buy_order_type = buy_order_type
+        if sell_order_type not in valid_order_types:
+            raise ValueError(f"Invalid order type {sell_order_type}")
+        self.sell_order_type = sell_order_type
+
+        valid_times_in_force = {'FOK', 'GTC', 'IOC'}
+        if buy_time_in_force not in valid_times_in_force:
+            raise ValueError(f"Invalid time in force {buy_time_in_force}")
+        self.buy_time_in_force = buy_time_in_force
+        if sell_time_in_force not in valid_times_in_force:
+            raise ValueError(f"Invalid time in force {sell_time_in_force}")
+        self.sell_time_in_force = sell_time_in_force
+
+        # all of these can be computed from candlesticks
         self.prices: t.Optional[Series] = None
         self.trends: t.Optional[Series] = None
         self.volume: t.Optional[Series] = None
         self.scores: t.Optional[Series] = None
+
         self.market_info: t.Optional[t.Dict[str, dict]] = None
         self.taker_fee: t.Optional[Decimal] = None
         self.maker_fee: t.Optional[Decimal] = None
 
         # STATES
         self.desired_limit_buys: deque[DesiredLimitBuy] = deque()
+        self.desired_market_buys: t.List[DesiredMarketBuy] = []
         self.pending_limit_buys: t.List[PendingLimitBuy] = []
+        self.pending_market_buys: t.List[PendingMarketBuy] = []
         self.pending_cancel_buys: t.List[PendingCancelBuy] = []
         self.active_positions: t.List[ActivePosition] = []
         self.desired_limit_sells: t.List[DesiredLimitSell] = []
@@ -145,6 +203,8 @@ class PortfolioManager:
     def calculate_market_base_sizes(self) -> pd.Series:
         sizes = defaultdict(lambda: Decimal('0'))
         positions = it.chain(self.desired_limit_buys, self.pending_limit_buys,
+                             self.desired_market_buys,
+                             self.pending_market_buys,
                              self.pending_cancel_buys, self.active_positions,
                              self.desired_limit_sells,
                              self.desired_market_sells)
@@ -232,12 +292,14 @@ class PortfolioManager:
         if not len(allowed):
             return nil_weights
         scores = scores.loc[allowed]
-        threshold = Decimal('0.005')
+        threshold = Decimal('0')
+        # todo: incorporate fib score
         notna_scores = scores[scores.notna()]
         positive_scores = notna_scores[notna_scores.gt(threshold)].map(Decimal)
         if not len(positive_scores):
             return nil_weights
         ranked_scores = positive_scores.sort_values(ascending=False)
+        # todo: absolute strength / moving average
         cumulative_normalized_scores = ranked_scores / ranked_scores.cumsum()
         hypothetical_sizes = cumulative_normalized_scores * spending_limit
         hypothetical_sizes_ok = hypothetical_sizes >= self.min_position_size
@@ -268,30 +330,84 @@ class PortfolioManager:
         decimal_weights = weights.map(Decimal)
         for market, weight in decimal_weights.iteritems():
             assert isinstance(market, str)
-            price = self.prices[market]
-            size = weight * spending_limit / price
-            allocation = weight * spending_limit
+            self.counter.increment()
             previous_state = RootState(market=market,
                                        number=self.counter.monotonic_count)
-            buy = DesiredLimitBuy(price=price,
-                                  size=size,
-                                  market=market,
-                                  allocation=allocation,
-                                  previous_state=previous_state,
-                                  state_change=f'buy target {weight:.2f}')
-            self.counter.increment()
-            logger.info(f"{buy}")
-            self.desired_limit_buys.appendleft(buy)
+            state_change = f'buy target {weight:.2f}'
+            if self.buy_order_type == 'limit' and market in self.prices:
+                price = self.prices[market]
+                size = weight * spending_limit / price
+                buy = DesiredLimitBuy(price=price,
+                                      size=size,
+                                      market=market,
+                                      previous_state=previous_state,
+                                      state_change=state_change)
+                logger.info(f"{buy}")
+                self.desired_limit_buys.appendleft(buy)
+            elif self.buy_order_type == 'market':
+                funds = weight * spending_limit
+                buy = DesiredMarketBuy(funds=funds, market=market,
+                                       previous_state=previous_state,
+                                       state_change=state_change)
+                logger.info(f"{buy}")
+                self.desired_market_buys.append(buy)
         return None
 
-    def check_desired_buys(self) -> None:
+    def check_desired_market_buys(self) -> None:
+        """
+        Place GTC orders for desired buys and add to pending buys queue.
+
+        Only place orders for markets that are online.
+        Only place orders that are within exchange markets for market.
+        """
+        for buy in self.desired_market_buys:
+            market = buy.market
+            info = self.market_info[market]
+            if info['status'] != 'online' or info['trading_disabled']:
+                self.counter.decrement()
+                continue
+                # could probably use post_only in the order flags
+            elif info['cancel_only'] or info['post_only']:
+                self.counter.decrement()
+                continue
+            elif info['limit_only']:
+                # could re-direct to limit order
+                self.counter.decrement()
+                continue
+            funds = buy.funds.quantize(Decimal(info['quote_increment']),
+                                       rounding='ROUND_DOWN')
+            min_funds = Decimal(info['min_market_funds'])
+            if funds < min_funds:
+                self.counter.decrement()
+                continue
+            max_funds = Decimal(info['market_max_funds'])
+            funds = min(funds, max_funds)
+            order = self.client.retryable_market_order(market, side='buy',
+                                                       funds=str(funds))
+            self.cool_down.bought(market)
+            if 'id' not in order:  # There was a problem with the order
+                logger.warning(order)
+                self.counter.decrement()
+                continue
+            created_at = dateutil.parser.parse(order['created_at'])
+            order_id = order['id']
+            self.tracker.remember(order_id)
+            pending = PendingMarketBuy(funds, market=market,
+                                       order_id=order_id,
+                                       created_at=created_at,
+                                       previous_state=buy,
+                                       state_change='order placed')
+            logger.info(f"{pending}")
+            self.pending_market_buys.append(pending)
+        # RESET DESIRED BUYS
+        self.desired_market_buys = []
+
+    def check_desired_limit_buys(self) -> None:
         """
         Place GTC orders for desired buys and add to pending buys queue.
 
         Only place orders for markets that are online.
         Only place orders that are within exchange limits for market.
-
-        Percentage-of-volume trading at some point?
         """
         for buy in self.desired_limit_buys:
             market = buy.market
@@ -313,10 +429,11 @@ class PortfolioManager:
                 continue
             max_size = Decimal(info['base_max_size'])
             size = min(size, max_size)
+            tif = self.buy_time_in_force
             order = self.client.retryable_limit_order(market, side='buy',
                                                       price=str(price),
                                                       size=str(size),
-                                                      time_in_force='GTC',
+                                                      time_in_force=tif,
                                                       stp='cn')
             self.cool_down.bought(market)
             if 'id' not in order:
@@ -336,7 +453,7 @@ class PortfolioManager:
         # RESET DESIRED BUYS
         self.desired_limit_buys = deque()
 
-    def check_pending_buys(self) -> None:
+    def check_pending_limit_buys(self) -> None:
         """
         Using "done" and "open" orders.
         Move done orders to active_positions.
@@ -412,6 +529,59 @@ class PortfolioManager:
         # RESET PENDING BUYS
         self.pending_limit_buys = next_generation
 
+    def check_pending_market_buys(self) -> None:
+        """
+        Using "done" and "open" orders.
+        Move done orders to active_positions.
+        Cancel open orders that are older than age limit.
+        If cancelling an order, add the filled_size to active_positions.
+        """
+        next_generation: t.List[PendingMarketBuy] = []  # Word to Bob
+        for pending_buy in self.pending_market_buys:
+            market_info = self.market_info[pending_buy.market]
+            if market_info['trading_disabled']:
+                next_generation.append(pending_buy)
+                continue
+            order_id = pending_buy.order_id
+            if pending_buy.created_at > self.tick_time:
+                # buy was created during this iteration, nothing to do
+                next_generation.append(pending_buy)
+                continue
+            if order_id not in self.orders:
+                # buy was canceled externally before being filled
+                # candidate explanation is self-trade prevention
+                # we don't do anything about this
+                self.tracker.forget(order_id)
+                self.counter.decrement()
+                continue
+            order = self.orders[order_id]
+            status = order['status']
+            if status in {'open', 'pending', 'active'}:
+                next_generation.append(pending_buy)
+                continue
+            elif status == 'done':
+                self.tracker.forget(order_id)
+                size = Decimal(order['filled_size'])
+                price = Decimal(order['executed_value']) / size
+                fee = Decimal(order['fill_fees'])
+                # place stop loss order
+                # place take profit order
+                # accounting for orders
+                active_position = ActivePosition(price, size, fee,
+                                                 market=pending_buy.market,
+                                                 start=self.tick_time,
+                                                 previous_state=pending_buy,
+                                                 state_change='order filled')
+                logger.info(f"{active_position}")
+                self.active_positions.append(active_position)
+            else:
+                logger.warning(f"Unknown status {status}.")
+                logger.debug(order)
+                next_generation.append(pending_buy)
+                continue
+        # RESET PENDING BUYS
+        self.pending_market_buys = next_generation
+
     def check_active_positions(self) -> None:
         """
         Adjust stop losses on active positions.
@@ -430,8 +600,14 @@ class PortfolioManager:
             if market not in self.trends:
                 self.trends.loc[market] = 0.
             increment = Decimal(market_info['base_increment'])
+            trend_score = self.trends[market]
+            sell_fraction = max(0., min(1., (trend_score - 1) / -2))
+            stability_score = 0.  # todo: use a real value
+            # respond more quickly to a change in a stable trend
+            drawdown_coefficient = (1 + stability_score) * .05
+            sell_fraction = Decimal(drawdown_coefficient * sell_fraction)
             sell_size = compute_sell_size(position.size,
-                                          self.trends[market],
+                                          sell_fraction,
                                           min_size,
                                           increment)
             remainder = position.size - sell_size
@@ -440,12 +616,21 @@ class PortfolioManager:
                     self.counter.increment()
                 fraction = sell_size / position.size
                 state_change = f'sell {fraction:.3f}' if remainder else 'sell'
-                sell = DesiredMarketSell(sell_size,
-                                         market=market,
-                                         previous_state=position,
-                                         state_change=state_change)
-                logger.info(f"{sell}")
-                self.desired_market_sells.append(sell)
+                if self.sell_order_type == 'limit' and market in self.prices:
+                    sell = DesiredLimitSell(size=sell_size,
+                                            price=self.prices.loc[market],
+                                            market=market,
+                                            previous_state=position,
+                                            state_change=state_change)
+                    logger.info(f"{sell}")
+                    self.desired_limit_sells.append(sell)
+                elif self.sell_order_type == 'market':
+                    sell = DesiredMarketSell(size=sell_size,
+                                             market=market,
+                                             previous_state=position,
+                                             state_change=state_change)
+                    logger.info(f"{sell}")
+                    self.desired_market_sells.append(sell)
             if remainder == position.size:
                 next_generation.append(position)
             elif remainder:
@@ -572,12 +757,12 @@ class PortfolioManager:
             quote_increment = Decimal(market_info['quote_increment'])
             price = sell.price.quantize(quote_increment, rounding='ROUND_DOWN')
             post_only = market_info['post_only']
+            tif = self.sell_time_in_force
             order = self.client.retryable_limit_order(sell.market,
                                                       side='sell',
                                                       price=str(price),
-                                                      size=str(
-                                                          sell.size),
-                                                      time_in_force='GTC',
+                                                      size=str(sell.size),
+                                                      time_in_force=tif,
                                                       stp='co',
                                                       post_only=post_only)
             if 'id' not in order:
@@ -866,10 +1051,11 @@ class PortfolioManager:
         self.check_desired_limit_sells()
         self.check_active_positions()
         self.check_cancel_buys()
-        self.check_pending_buys()
-        self.check_desired_buys()
+        self.check_pending_limit_buys()
+        self.check_desired_market_buys()
+        self.check_desired_limit_buys()
+        self.check_desired_market_buys()
 
-        # NOTE: Assumption is all allocations reflected in available funds
         # This implies there are no desired buys during queue_buys.
         self.set_portfolio_available_funds()
         self.queue_buys()
