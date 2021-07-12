@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
+from indicators.trend_follower import TrendFollower
 
 from indicators.momentum import Momentum
-from indicators.trend_follower import TrendFollower
 from indicators.trend_stability import TrendStability
 from indicators.volume import TrailingQuoteVolume
 
@@ -15,11 +15,18 @@ class FibTrader:
     def __init__(self, a: int, b: int):
         self.a = a
         self.b = b
-        self.periods = 5
+        self.periods = a + b
         self.acceleration = TrendFollower(a=self.a, b=self.b, trend_sign=1)
         self.stability = TrendStability(self.periods)
         self.momentum = Momentum(self.periods)
         self.quote_volume = TrailingQuoteVolume(self.periods)
+
+    @property
+    def periods_required(self) -> int:
+        return max(self.acceleration.periods_required,
+                   self.stability.periods_required,
+                   self.momentum.periods_required,
+                   self.quote_volume.periods_required)
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         strength = self.acceleration.compute(candles)
@@ -32,7 +39,7 @@ class FibTrader:
         mask = combine_momentum(a_mom) > 0.001
         net_momentum = np.maximum(overall, 0.)
         net_strength = np.log2(np.maximum(strength, 1.))  # avoid zero division
-        score = (net_strength * stability * net_momentum * log_volume)
+        score = (net_strength * stability * net_momentum)
         score = score.loc[mask[mask].index]
         analysis = pd.DataFrame(
             {'strength': net_strength, 'stability': stability,
@@ -52,7 +59,7 @@ def main():
     from influxdb_client import InfluxDBClient
 
     from settings import influx_db as influx_db_settings
-    from indicators.sliding_candles import CandleSticks
+    from indicators.sliding_candles import CandleSticks as SlidingCandles
 
     influx = InfluxDBClient(influx_db_settings.INFLUX_URL,
                             influx_db_settings.INFLUX_TOKEN,
@@ -62,11 +69,12 @@ def main():
     trader = FibTrader(3, 2)
     records = []
     times = []
-    candles_indicator = CandleSticks(influx, 'coinbasepro', 6,
-                                     timedelta(minutes=1))
+    sliding_indicator = SlidingCandles(influx, 'coinbasepro',
+                                       trader.periods_required,
+                                       timedelta(minutes=1))
     while True:
         _start = time.time()
-        scores = trader.compute(candles_indicator.compute())
+        scores = trader.compute(sliding_indicator.compute())
         nonzero = scores[scores > 0].rename('scores')
         record = nonzero.to_dict()
         if record:

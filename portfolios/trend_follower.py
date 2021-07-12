@@ -3,14 +3,18 @@ import signal
 import sys
 from datetime import timedelta
 
+import numpy as np
+import pandas as pd
 from influxdb_client import InfluxDBClient
 
 from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import AuthenticatedClient
-from indicators import Ticker, TrailingVolume, TrendFollower
+from indicators import Ticker, TrailingVolume, TrendAcceleration, \
+    TrendStability
 from indicators.fib_trader import FibTrader
+from indicators.sliding_candles import CandleSticks
 from settings import influx_db as influx_db_settings, \
     coinbase as coinbase_settings, portfolio as portfolio_settings
 
@@ -22,14 +26,51 @@ logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
                     level=logging.DEBUG)
 
 
+class BuyIndicator:
+    def __init__(self, a: int, b: int):
+        self.a = a
+        self.b = b
+        self.fib_trader = FibTrader(a, b)
+        self.alpha = 0.995
+        self.score_moving_average = 0.
+
+    @property
+    def periods_required(self) -> int:
+        return self.fib_trader.periods_required
+
+    def compute(self, candles: pd.DataFrame) -> pd.Series:
+        scores = self.fib_trader.compute(candles)
+        scores = scores[scores > 0.]
+        score_sum = scores.sum()
+        self.score_moving_average *= self.alpha
+        self.score_moving_average += (1 - self.alpha) * score_sum
+        scores = scores / max(self.score_moving_average, score_sum)
+        return scores[scores.notna()]
+
+
+class SellIndicator:
+    def __init__(self, a: int, b: int):
+        self.acceleration = TrendAcceleration(a, b)
+        self.stability = TrendStability(a + b)
+        self.k = 1
+
+    @property
+    def periods_required(self) -> int:
+        return max(self.acceleration.periods_required,
+                   self.stability.periods_required)
+
+    def compute(self, candles: pd.DataFrame) -> pd.Series:
+        stability = self.stability.compute(candles)
+        acceleration = self.acceleration.compute(candles)
+        fraction = np.maximum(0., np.minimum(1., (acceleration - 1) / -2))
+        return (fraction * (self.k + stability)).fillna(1.)
+
+
 def main() -> None:
     client = InfluxDBClient(influx_db_settings.INFLUX_URL,
                             influx_db_settings.INFLUX_TOKEN,
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
-    fibonacci = FibTrader(A, B)
-    volume = TrailingVolume(periods=5)
-    ticker = Ticker()
     coinbase = AuthenticatedClient(key=coinbase_settings.API_KEY,
                                    b64secret=coinbase_settings.SECRET,
                                    passphrase=coinbase_settings.PASSPHRASE,
@@ -37,16 +78,26 @@ def main() -> None:
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
     cool_down = VolatilityCoolDown(period=timedelta(minutes=0))
-    trend_follower = TrendFollower(a=A, b=B)
-    manager = PortfolioManager(coinbase, price_indicator=ticker,
-                               volume_indicator=volume,
-                               score_indicator=fibonacci,
-                               trend_indicator=trend_follower,
+    buy_indicator = BuyIndicator(A, B)
+    sell_indicator = SellIndicator(A, B)
+    volume_indicator = TrailingVolume(periods=A + B)
+    price_indicator = Ticker(A + B)
+    candle_periods = max(buy_indicator.periods_required,
+                         sell_indicator.periods_required,
+                         price_indicator.periods_required,
+                         volume_indicator.periods_required, )
+    candles_src = CandleSticks(client, portfolio_settings.EXCHANGE,
+                               candle_periods,
+                               timedelta(minutes=1))
+    manager = PortfolioManager(coinbase, candles_src,
+                               buy_indicator=buy_indicator,
+                               sell_indicator=sell_indicator,
+                               price_indicator=price_indicator,
+                               volume_indicator=volume_indicator,
+                               cool_down=cool_down, liquidate_on_shutdown=True,
                                market_blacklist={'USDT-USD', 'DAI-USD'},
-                               stop_loss=stop_loss, liquidate_on_shutdown=True,
-                               buy_order_type='market',
-                               sell_order_type='market',
-                               cool_down=cool_down)
+                               stop_loss=stop_loss, sell_order_type='market',
+                               buy_order_type='market')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()

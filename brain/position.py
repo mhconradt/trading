@@ -145,6 +145,17 @@ class ActivePosition(PositionState):
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
 
+    def merge(self, other: "ActivePosition") -> "ActivePosition":
+        if other.market != self.market:
+            raise ValueError(f"{other.market} != {self.market}")
+        fees = self.fees + other.fees
+        size = self.size + other.size
+        price = ((self.price * self.size) + (other.price * other.size)) / size
+        start = min(self.start, other.start)
+        state_change = 'merge'
+        return ActivePosition(price=price, size=size, fees=fees, start=start,
+                              market=self.market, state_change=state_change)
+
     def drawdown_clone(self, remainder: Decimal) -> "ActivePosition":
         fraction = (self.size - remainder) / self.size
         change = f"drawdown {fraction:.3f}"
@@ -258,8 +269,7 @@ if __name__ == '__main__':
     root = Download(number=1, market='BTC-USD')
     desired_buy = DesiredLimitBuy(market='BTC-USD', price=Decimal('42000.'),
                                   size=Decimal('1.234'), previous_state=root,
-                                  state_change='buy STRONGLY indicated',
-                                  allocation=Decimal('0'))
+                                  state_change='buy STRONGLY indicated')
     pending_buy = PendingLimitBuy(market=desired_buy.market,
                                   price=desired_buy.price,
                                   size=desired_buy.size, order_id='order',

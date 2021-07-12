@@ -4,7 +4,7 @@ import pandas as pd
 from indicators.momentum import Momentum
 
 
-class TrendFollower:
+class TrendAcceleration:
     """
     Detects reversal of a trend. i.e. positive turns negative.
     """
@@ -14,6 +14,10 @@ class TrendFollower:
         self.a = a
         self.b = b
         self.trend_sign = trend_sign
+
+    @property
+    def periods_required(self) -> int:
+        return self.momentum.periods_required
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         momentum = self.momentum.compute(candles)
@@ -40,7 +44,7 @@ def main():
                             influx_db_settings.INFLUX_TOKEN,
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
-    indicator = TrendFollower(a=3, b=2)  # fib(4), fib(3)
+    indicator = TrendAcceleration(a=3, b=2)  # fib(4), fib(3)
     candles = CandleSticks(influx, 'coinbasepro', 6, timedelta(minutes=1))
     while True:
         _start = time.time()

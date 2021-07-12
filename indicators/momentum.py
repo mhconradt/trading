@@ -6,6 +6,10 @@ class Momentum:
         self.periods = periods
         self.span = span
 
+    @property
+    def periods_required(self) -> int:
+        return self.periods + self.span
+
     def compute(self, candles: pd.DataFrame) -> pd.DataFrame:
         closes = candles['close'].unstack('market')
         momentum = closes.pct_change(self.span)

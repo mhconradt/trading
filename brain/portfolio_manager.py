@@ -29,40 +29,8 @@ from indicators.protocols import InstantIndicator
 
 logger = logging.getLogger(__name__)
 
-# todo: remove cooldown / set to zero
-# todo: factor in lower latency
-# todo: expose kernels?
-
-"""
-Phase A: done
-0. Add market order functionality
-1. Set cooldown to zero
--1: Is there a way to waterfall a position through each state in one go?
-
-Phase B:
-0. Refactor to lazily compute all indicator values from candlesticks
-    - re-factor classes to consume candles in .compute() method
-    - classes have a .required_periods property
-1. .candles added as tick variable, could be sliding or not
-2. indicator classes used in place of the tick variables
-
-Phase C:
-0. refactor active_positions to merge positions
-    - probably means removing stop_loss stuff
-1. remove state tracking functionality
-    - consumption
-    - pushing
-
-Phase D:
-0. use fibtrader as score_indicator
-1. Pin scores to moving average or something
-
-
-"""
-
 
 # starting to see opportunity for different components
-# don't even expose the indicator values
 
 
 def compute_l1_sell_size(size: Decimal, fraction: Decimal,
@@ -111,32 +79,36 @@ def compute_sell_size(size: Decimal, fraction: Decimal,
 
 
 class PortfolioManager:
-    def __init__(self, client: AuthenticatedClient,
+    def __init__(self, client: AuthenticatedClient, candles_src,
+                 buy_indicator: InstantIndicator,
+                 sell_indicator: InstantIndicator,
                  price_indicator: InstantIndicator,
                  volume_indicator: InstantIndicator,
-                 score_indicator: InstantIndicator,
-                 trend_indicator: InstantIndicator,
+                 cool_down: VolatilityCoolDown, liquidate_on_shutdown: bool,
                  market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
-                 liquidate_on_shutdown: bool, cool_down: VolatilityCoolDown,
-                 buy_order_type: str = 'limit', sell_order_type: str = 'limit',
-                 buy_time_in_force: str = 'GTC',
-                 sell_time_in_force: str = 'GTC'):
+                 sell_order_type: str = 'limit',
+                 sell_time_in_force: str = 'GTC',
+                 buy_order_type: str = 'limit',
+                 buy_time_in_force: str = 'GTC'):
         self.initialized = False
         self.client = client
+        self.candles_src = candles_src
         self.price_indicator = price_indicator
         self.volume_indicator = volume_indicator
-        self.score_indicator = score_indicator
-        self.trend_indicator = trend_indicator
+        self.buy_indicator = buy_indicator
+        self.sell_indicator = sell_indicator
         accounts = self.client.get_accounts()
         self.usd_account_id = [account['id'] for account in accounts if
                                account['currency'] == 'USD'][0]
         self.tracker = SyncCoinbaseOrderTracker(client)
         # avoid congesting system with dozens of tiny positions
-        self.min_position_size = Decimal('10')
-        self.max_positions = 100
+        self.min_position_size = Decimal('0')
+        self.max_positions = 256
+
+        self.spend_fraction = Decimal('0.05')
 
         self.pop_limit = Decimal('0.25')
-        self.pov_limit = Decimal('0.1')
+        self.pov_limit = Decimal('0.2')
 
         self.counter = PositionCounter()
 
@@ -166,9 +138,9 @@ class PortfolioManager:
 
         # all of these can be computed from candlesticks
         self.prices: t.Optional[Series] = None
-        self.trends: t.Optional[Series] = None
         self.volume: t.Optional[Series] = None
-        self.scores: t.Optional[Series] = None
+        self.buy_weights: t.Optional[Series] = None
+        self.sell_fractions = t.Optional[Series] = None
 
         self.market_info: t.Optional[t.Dict[str, dict]] = None
         self.taker_fee: t.Optional[Decimal] = None
@@ -195,10 +167,6 @@ class PortfolioManager:
 
         self.liquidate_on_shutdown = liquidate_on_shutdown
         self.stop = False
-
-    @property
-    def transaction_cost_estimate(self) -> Decimal:
-        return (Decimal('1') + self.taker_fee) ** 2 - Decimal('1')
 
     def calculate_market_base_sizes(self) -> pd.Series:
         sizes = defaultdict(lambda: Decimal('0'))
@@ -279,38 +247,29 @@ class PortfolioManager:
         weights = weights[weights.notna() & weights.gt(0.)]
         return weights
 
-    def compute_buy_weights(self, scores: Series,
-                            spending_limit: Decimal) -> Series:
+    def limit_weights(self, target_weights: Series,
+                      spending_limit: Decimal) -> Series:
         nil_weights = Series([], dtype=np.float64)
         if spending_limit < self.min_position_size:
             return nil_weights
         if self.counter.count == self.max_positions:
             return nil_weights
-        cooling_down = filter(self.cool_down.cooling_down, scores.index)
-        allowed = scores.index.difference(cooling_down)
+        cooling_down = filter(self.cool_down.cooling_down,
+                              target_weights.index)
+        allowed = target_weights.index.difference(cooling_down)
         allowed = allowed.difference(self.blacklist)
-        if not len(allowed):
+        filtered_weights = target_weights.loc[allowed]
+        if not len(filtered_weights):
             return nil_weights
-        scores = scores.loc[allowed]
-        threshold = Decimal('0')
-        # todo: incorporate fib score
-        notna_scores = scores[scores.notna()]
-        positive_scores = notna_scores[notna_scores.gt(threshold)].map(Decimal)
-        if not len(positive_scores):
+        limited_weights = self.apply_size_limits(filtered_weights,
+                                                 spending_limit)
+        min_weight = self.min_position_size / spending_limit
+        large_enough = limited_weights[limited_weights.gt(min_weight)]
+        if not len(large_enough):
             return nil_weights
-        ranked_scores = positive_scores.sort_values(ascending=False)
-        # todo: absolute strength / moving average
-        cumulative_normalized_scores = ranked_scores / ranked_scores.cumsum()
-        hypothetical_sizes = cumulative_normalized_scores * spending_limit
-        hypothetical_sizes_ok = hypothetical_sizes >= self.min_position_size
-        min_position_size_limit = int(hypothetical_sizes_ok.sum())
         position_count_limit = self.max_positions - self.counter.count
-        limit = min(min_position_size_limit, position_count_limit)
-        if not limit:
-            return nil_weights
-        final_scores = cumulative_normalized_scores.iloc[:limit]
-        weights = final_scores / final_scores.sum()
-        weights = self.apply_size_limits(weights, spending_limit)
+        ranked_weights = limited_weights.sort_values(ascending=False)
+        weights = ranked_weights.head(position_count_limit)
         logger.debug(weights)
         return weights
 
@@ -324,9 +283,9 @@ class PortfolioManager:
         Don't queue if would put market above market_percentage_limit.
         Don't queue if would violate volatility cooldown.
         """
-        starting_budget = self.portfolio_available_funds
+        starting_budget = self.portfolio_available_funds * self.spend_fraction
         spending_limit = starting_budget / (Decimal('1') + self.taker_fee)
-        weights = self.compute_buy_weights(self.scores, spending_limit)
+        weights = self.limit_weights(self.buy_weights, spending_limit)
         decimal_weights = weights.map(Decimal)
         for market, weight in decimal_weights.iteritems():
             assert isinstance(market, str)
@@ -582,12 +541,23 @@ class PortfolioManager:
         # RESET PENDING BUYS
         self.pending_market_buys = next_generation
 
+    def compress_active_positions(self) -> None:
+        accumulators: t.Dict[str, ActivePosition] = {}
+        for position in self.active_positions:
+            if position.market in accumulators:
+                accumulator = accumulators[position.market]
+                accumulators[position.market] = accumulator.merge(position)
+            else:
+                accumulators[position.market] = position
+        self.active_positions = list(accumulators.values())
+
     def check_active_positions(self) -> None:
         """
         Adjust stop losses on active positions.
         Move stop loss triggered positions to desired limit sell.
 
         """
+        self.compress_active_positions()
         next_generation: t.List[ActivePosition] = []
         for position in self.active_positions:
             market = position.market
@@ -596,16 +566,8 @@ class PortfolioManager:
             if position.size < min_size:
                 self.counter.decrement()
                 continue
-            # this will start to unwind the position
-            if market not in self.trends:
-                self.trends.loc[market] = 0.
             increment = Decimal(market_info['base_increment'])
-            trend_score = self.trends[market]
-            sell_fraction = max(0., min(1., (trend_score - 1) / -2))
-            stability_score = 0.  # todo: use a real value
-            # respond more quickly to a change in a stable trend
-            drawdown_coefficient = (1 + stability_score) * .05
-            sell_fraction = Decimal(drawdown_coefficient * sell_fraction)
+            sell_fraction = self.sell_fractions[market] * self.spend_fraction
             sell_size = compute_sell_size(position.size,
                                           sell_fraction,
                                           min_size,
@@ -957,10 +919,11 @@ class PortfolioManager:
 
     def set_tick_variables(self) -> None:
         self.set_portfolio_available_funds()
-        self.prices = self.price_indicator.compute().map(Decimal)
-        self.volume = self.volume_indicator.compute().map(Decimal)
-        self.scores = self.score_indicator.compute()
-        self.trends = self.trend_indicator.compute()
+        candles = self.candles_src.compute()
+        self.prices = self.price_indicator.compute(candles).map(Decimal)
+        self.volume = self.volume_indicator.compute(candles).map(Decimal)
+        self.buy_weights = self.buy_indicator.compute(candles).map(Decimal)
+        self.sell_fractions = self.sell_indicator.compute(candles).map(Decimal)
         self.set_market_info()
         self.tick_time, self.orders = self.tracker.barrier_snapshot()
         self.set_fee()

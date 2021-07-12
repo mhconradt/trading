@@ -6,6 +6,10 @@ class TrailingVolume:
     def __init__(self, periods: int):
         self.periods = periods
 
+    @property
+    def periods_required(self) -> int:
+        return self.periods
+
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         candles = candles.unstack('market').tail(self.periods).stack('market')
         return candles.volume.groupby(level='market').sum()
@@ -14,6 +18,10 @@ class TrailingVolume:
 class TrailingQuoteVolume:
     def __init__(self, periods: int):
         self.periods = periods
+
+    @property
+    def periods_required(self) -> int:
+        return self.periods
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         candles = candles.unstack('market').tail(self.periods).stack('market')

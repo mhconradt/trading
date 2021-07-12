@@ -2,11 +2,18 @@ import pandas as pd
 
 
 class Ticker:
-    def __init__(self):
-        pass
+    def __init__(self, periods: int):
+        self.periods = periods
+
+    @property
+    def periods_required(self) -> int:
+        return self.periods
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         closes = candles['close'].unstack('market')
+        fill_limit = self.periods - 1
+        if fill_limit:
+            closes = closes.ffill(limit=fill_limit)
         return closes.iloc[-1]
 
 
@@ -22,7 +29,7 @@ def main():
                              influx_db_settings.INFLUX_TOKEN,
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG)
-    ticker = Ticker()
+    ticker = Ticker(1)
     candles = CandleSticks(_influx, 'coinbasepro', 1, timedelta(minutes=1))
     while True:
         _start = time.time()
