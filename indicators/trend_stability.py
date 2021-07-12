@@ -1,10 +1,5 @@
-from datetime import timedelta
-
 import numpy as np
 import pandas as pd
-from influxdb_client import InfluxDBClient
-
-from indicators.candles import CandleSticks
 
 
 def interval_intersection(x_lower: pd.Series, x_upper: pd.Series,
@@ -19,7 +14,7 @@ def interval_intersection(x_lower: pd.Series, x_upper: pd.Series,
     return term0 - term1 + term2
 
 
-def compute_stability_scores(candles):
+def compute_stability_scores(candles: pd.DataFrame) -> pd.Series:
     prd_open = candles.open.unstack('market').bfill().iloc[0]
     prd_close = candles.close.unstack('market').ffill().iloc[-1]
     prd_up = prd_close > prd_open
@@ -42,34 +37,39 @@ def compute_stability_scores(candles):
 
 
 class TrendStability:
-    def __init__(self, client: InfluxDBClient, exchange: str, periods: int,
-                 frequency: timedelta):
+    def __init__(self, periods: int):
         self.periods = periods
-        self.candles = CandleSticks(client, exchange, periods=self.periods,
-                                    frequency=frequency)
 
-    def compute(self) -> pd.Series:
-        candles = self.candles.compute()
+    def compute(self, candles: pd.DataFrame) -> pd.Series:
+        candles = candles.unstack('market').tail(self.periods).stack('market')
         score = compute_stability_scores(candles)
         return score
 
 
-if __name__ == '__main__':
+def main():
     import time
+    from datetime import timedelta
+
     import matplotlib.pyplot as plt
+    from influxdb_client import InfluxDBClient
+
     import settings.influx_db as influx_db_settings
+    from indicators.sliding_candles import CandleSticks
 
     influx = InfluxDBClient(influx_db_settings.INFLUX_URL,
                             influx_db_settings.INFLUX_TOKEN,
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
-
-    indicator = TrendStability(influx, 'coinbasepro', 5, timedelta(minutes=1))
+    indicator = TrendStability(periods=5)
+    candles = CandleSticks(influx, 'coinbasepro', 5, timedelta(minutes=1))
     while True:
-        results = indicator.compute().sort_values()
+        _start = time.time()
+        results = indicator.compute(candles.compute()).sort_values()
         print(results.describe())
-        print(f"LTC: {results.loc['LTC-USD']}")
-        print(f"SUSHI: {results.loc['SUSHI-USD']}")  # 16:03 to 16:07
         results.plot.hist()
         plt.show()
-        time.sleep(60)
+        print(f"Took {time.time() - _start:.2f}s")
+
+
+if __name__ == '__main__':
+    main()

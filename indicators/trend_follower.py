@@ -1,10 +1,7 @@
-from datetime import timedelta
-
 import numpy as np
 import pandas as pd
-from influxdb_client import InfluxDBClient
 
-from .sliding_momentum import SlidingMomentum
+from indicators.momentum import Momentum
 
 
 class TrendFollower:
@@ -12,19 +9,14 @@ class TrendFollower:
     Detects reversal of a trend. i.e. positive turns negative.
     """
 
-    def __init__(self, client: InfluxDBClient, exchange: str, a: int = 1,
-                 b: int = 1, trend_sign: int = 1,
-                 frequency: timedelta = timedelta(minutes=1)):
-        self.client = client
-        self.sliding_momentum = SlidingMomentum(client, exchange=exchange,
-                                                periods=a + b,
-                                                frequency=frequency)
+    def __init__(self, a: int = 1, b: int = 1, trend_sign: int = 1):
+        self.momentum = Momentum(periods=a + b)
         self.a = a
         self.b = b
         self.trend_sign = trend_sign
 
-    def compute(self) -> pd.Series:
-        momentum = self.sliding_momentum.compute()
+    def compute(self, candles: pd.DataFrame) -> pd.Series:
+        momentum = self.momentum.compute(candles)
         a, b = momentum.iloc[:self.a], momentum.iloc[self.a:self.a + self.b]
         a, b = a + 1, b + 1
         # geometric mean
@@ -36,15 +28,25 @@ class TrendFollower:
             return b / a
 
 
-if __name__ == '__main__':
-    import settings.influx_db as influx_db_settings
+def main():
+    import time
+    from datetime import timedelta
 
+    from influxdb_client import InfluxDBClient
+
+    import settings.influx_db as influx_db_settings
+    from indicators.sliding_candles import CandleSticks
     influx = InfluxDBClient(influx_db_settings.INFLUX_URL,
                             influx_db_settings.INFLUX_TOKEN,
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
-
-    indicator = TrendFollower(influx, 'coinbasepro', a=3,
-                              b=2)  # fib(4), fib(3)
+    indicator = TrendFollower(a=3, b=2)  # fib(4), fib(3)
+    candles = CandleSticks(influx, 'coinbasepro', 6, timedelta(minutes=1))
     while True:
-        print(indicator.compute())
+        _start = time.time()
+        print(indicator.compute(candles.compute()))
+        print(f"Took {time.time() - _start:.2f}s")
+
+
+if __name__ == '__main__':
+    main()
