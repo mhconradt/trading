@@ -12,7 +12,7 @@ from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import AuthenticatedClient
 from indicators import Ticker, TrailingVolume, TrendAcceleration, \
-    TrendStability
+    TrendStability, Momentum
 from indicators.fib_trader import FibTrader
 from indicators.sliding_candles import CandleSticks
 from settings import influx_db as influx_db_settings, \
@@ -32,17 +32,23 @@ class BuyIndicator:
         self.b = b
         self.stability = TrendStability(periods=self.a + self.b)
         self.fib_trader = FibTrader(a, b)
+        self.momentum = Momentum(periods=1, span=15)
         self.alpha = 0.995
         self.score_moving_average = 0.
 
     @property
     def periods_required(self) -> int:
-        return self.fib_trader.periods_required
+        return max(self.fib_trader.periods_required,
+                   self.stability.periods_required,
+                   self.momentum.periods_required)
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         scores = self.fib_trader.compute(candles)
         stability = self.stability.compute(candles)
+        roc = self.momentum.compute(candles).iloc[-1]
+        pos_roc = roc[roc > 0.]
         scores = scores[scores > 0.]
+        scores = scores.loc[scores.index.intersection(pos_roc.index)]
         score_sum = scores.sum()
         self.score_moving_average *= self.alpha
         self.score_moving_average += (1 - self.alpha) * score_sum
@@ -53,7 +59,7 @@ class BuyIndicator:
 
 class SellIndicator:
     def __init__(self, a: int, b: int):
-        self.acceleration = TrendAcceleration(a, b)
+        self.acceleration = TrendAcceleration(a, b, momentum_mode='close')
         self.stability = TrendStability(a + b)
         self.k = 1
 
@@ -100,7 +106,8 @@ def main() -> None:
                                cool_down=cool_down, liquidate_on_shutdown=True,
                                market_blacklist={'USDT-USD', 'DAI-USD'},
                                stop_loss=stop_loss, sell_order_type='market',
-                               buy_order_type='market')
+                               buy_order_type='market',
+                               buy_time_in_force='FOK')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()

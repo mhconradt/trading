@@ -33,6 +33,7 @@ class VWAMomentum:
 
 def main():
     from datetime import timedelta
+    import time
 
     from influxdb_client import InfluxDBClient
 
@@ -44,11 +45,13 @@ def main():
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG)
 
-    mom = Momentum(periods=5)
+    mom = Momentum(periods=15)
     candles_src = CandleSticks(influx_client, 'coinbasepro',
-                               frequency=timedelta(minutes=1), periods=6)
+                               frequency=timedelta(minutes=1), periods=16)
     while True:
-        print(mom.compute(candles_src.compute()))
+        _start = time.time()
+        print(mom.compute(candles_src.compute()).iloc[-1].describe())
+        print(time.time() - _start)
 
 
 if __name__ == '__main__':

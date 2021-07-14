@@ -46,27 +46,29 @@ class SyncCoinbaseOrderTracker(OrderTracker):
         index = len(self.watchlist) - 1
         watched_items = set(self.watchlist)
         snapshot = {}
-        if not self.watchlist:
-            return {}
-        for order in self.client.get_orders(status='all'):
-            for i in range(index, -1, -1):
-                watch = self.watchlist[i]
-                order_id = order['id']
-                if watch == order_id:
-                    index -= 1
-                    snapshot[order_id] = order
-                    break
-                elif order_id not in watched_items and i:
-                    # ignore this order
-                    break
-                else:
-                    # watched item was canceled
-                    index -= 1
-                    self.forget(watch)
+        for order_id in self.watchlist:
+            order = self.client.get_order(order_id)
+            if order.get('message') == 'NotFound':
+                self.forget(order_id)
             else:
-                break
+                snapshot[order_id] = order
         return snapshot
 
     def forget(self, order_id: str) -> None:
         if order_id in self.watchlist:
             self.watchlist.remove(order_id)
+
+
+def main():
+    from helper.coinbase import AuthenticatedClient
+    from settings import coinbase as coinbase_settings
+
+    client = AuthenticatedClient(passphrase=coinbase_settings.PASSPHRASE,
+                                 key=coinbase_settings.API_KEY,
+                                 b64secret=coinbase_settings.SECRET)
+    o = client.get_order('3fc03072-924b-40f7-9cff-febc8546fefc')
+    print(o)
+
+
+if __name__ == '__main__':
+    main()

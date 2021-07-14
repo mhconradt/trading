@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from indicators.momentum import VWAMomentum
+from indicators.momentum import Momentum, VWAMomentum
 
 
 class TrendAcceleration:
@@ -9,10 +9,14 @@ class TrendAcceleration:
     Detects reversal of a trend. i.e. positive turns negative.
     """
 
-    def __init__(self, a: int = 1, b: int = 1, trend_sign: int = 1):
-        self.momentum = VWAMomentum(periods=a + b)
+    def __init__(self, a: int = 1, b: int = 1, trend_sign: int = 1,
+                 momentum_mode: str = 'close'):
         self.a = a
         self.b = b
+        if momentum_mode == 'volume_weighted':
+            self.momentum = VWAMomentum(periods=self.a + self.b)
+        else:
+            self.momentum = Momentum(periods=self.a + self.b)
         self.trend_sign = trend_sign
 
     @property

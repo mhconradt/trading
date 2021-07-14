@@ -78,6 +78,12 @@ def compute_sell_size(size: Decimal, fraction: Decimal,
         return l1_sell_size
 
 
+def compute_increment(target: float, over: timedelta,
+                      period: timedelta) -> float:
+    periods = over.total_seconds() / period.total_seconds()
+    return target ** (1 / periods)
+
+
 class PortfolioManager:
     def __init__(self, client: AuthenticatedClient, candles_src,
                  buy_indicator: InstantIndicator,
@@ -89,7 +95,11 @@ class PortfolioManager:
                  sell_order_type: str = 'limit',
                  sell_time_in_force: str = 'GTC',
                  buy_order_type: str = 'limit',
-                 buy_time_in_force: str = 'GTC'):
+                 buy_time_in_force: str = 'GTC',
+                 buy_half_life=timedelta(seconds=120),
+                 sell_half_life=timedelta(seconds=30)):
+        self.buy_half_life = buy_half_life
+        self.sell_half_life = sell_half_life
         self.initialized = False
         self.client = client
         self.candles_src = candles_src
@@ -105,8 +115,8 @@ class PortfolioManager:
         self.min_position_size = Decimal('0')
         self.max_positions = 256
 
-        self.sell_increment = Decimal('0.05')
-        self.buy_increment = Decimal('0.02')
+        self.sell_increment = Decimal('0.01')
+        self.buy_increment = Decimal('0.01')
 
         self.pop_limit = Decimal('0.25')
         self.pov_limit = Decimal('0.2')
@@ -932,19 +942,32 @@ class PortfolioManager:
         self.buy_weights = self.buy_indicator.compute(candles).map(Decimal)
         self.sell_fractions = self.sell_indicator.compute(candles).map(Decimal)
         self.set_market_info()
-        self.tick_time, self.orders = self.tracker.barrier_snapshot()
         self.set_fee()
+        tick_time, self.orders = self.tracker.barrier_snapshot()
+        last_tick_time = self.tick_time
+        self.tick_time = tick_time
+        if last_tick_time:
+            tick_duration = tick_time - last_tick_time
+            buy_half_life = self.buy_half_life
+            buy_target = 1. - float(self.pop_limit)
+            buy_increment = 1. - compute_increment(buy_target, buy_half_life,
+                                                   tick_duration)
+            self.buy_increment = Decimal(buy_increment)
+            sell_half_life = self.sell_half_life
+            sell_increment = 1. - compute_increment(.5, sell_half_life,
+                                                    tick_duration)
+            self.sell_increment = Decimal(sell_increment)
 
-    def set_market_info(self):
+    def set_market_info(self) -> None:
         self.market_info = {product['id']: product for product in
                             self.client.get_products()}
 
-    def set_fee(self):
+    def set_fee(self) -> None:
         fee_info = self.client.get_fees()
         self.taker_fee = Decimal(fee_info['taker_fee_rate'])
         self.maker_fee = Decimal(fee_info['maker_fee_rate'])
 
-    def set_portfolio_available_funds(self):
+    def set_portfolio_available_funds(self) -> None:
         usd_account = self.client.get_account(self.usd_account_id)
         self.portfolio_available_funds = Decimal(usd_account['available'])
 
