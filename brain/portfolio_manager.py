@@ -171,7 +171,7 @@ class PortfolioManager:
 
     def calculate_aum(self) -> Decimal:
         quote_sizes = self.calculate_market_quote_sizes()
-        total_size = quote_sizes.sum()
+        total_size = np.sum(quote_sizes)
         return total_size + self.portfolio_available_funds
 
     def calculate_market_quote_sizes(self) -> pd.Series:
@@ -210,7 +210,7 @@ class PortfolioManager:
         aum_size_limit = self.calculate_aum_size_limit()
         pov_size_limits = self.calculate_volume_size_limits()
         mv_limits = DataFrame({'aum': aum_size_limit, 'pov': pov_size_limits})
-        return mv_limits.min(axis=1).map(Decimal)
+        return np.min(mv_limits, axis=1).map(Decimal)
 
     def calculate_volume_size_limits(self) -> pd.Series:
         """
@@ -582,7 +582,7 @@ class PortfolioManager:
                 if remainder:
                     self.counter.increment()
                 sell_fraction = sell_size / position.size
-                state_change = f'sell {sell_fraction:.3f}' if remainder else 'sell'
+                state_change = f'sell {sell_fraction:.3f}'
                 if self.sell_order_type == 'limit' and market in self.prices:
                     sell = DesiredLimitSell(size=sell_size,
                                             price=self.prices.loc[market],

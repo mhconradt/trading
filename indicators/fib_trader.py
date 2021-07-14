@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from indicators.acceleration import TrendAcceleration
-from indicators.momentum import Momentum
+from indicators.momentum import VWAMomentum
 from indicators.trend_stability import TrendStability
 from indicators.volume import TrailingQuoteVolume
 
@@ -18,7 +18,7 @@ class FibTrader:
         self.periods = a + b
         self.acceleration = TrendAcceleration(a=self.a, b=self.b, trend_sign=1)
         self.stability = TrendStability(self.periods)
-        self.momentum = Momentum(self.periods)
+        self.momentum = VWAMomentum(self.periods)
         self.quote_volume = TrailingQuoteVolume(self.periods)
 
     @property

@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from indicators.momentum import Momentum
+from indicators.momentum import VWAMomentum
 
 
 class TrendAcceleration:
@@ -10,7 +10,7 @@ class TrendAcceleration:
     """
 
     def __init__(self, a: int = 1, b: int = 1, trend_sign: int = 1):
-        self.momentum = Momentum(periods=a + b)
+        self.momentum = VWAMomentum(periods=a + b)
         self.a = a
         self.b = b
         self.trend_sign = trend_sign
