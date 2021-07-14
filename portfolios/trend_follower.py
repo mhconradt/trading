@@ -30,6 +30,7 @@ class BuyIndicator:
     def __init__(self, a: int, b: int):
         self.a = a
         self.b = b
+        self.stability = TrendStability(periods=self.a + self.b)
         self.fib_trader = FibTrader(a, b)
         self.alpha = 0.995
         self.score_moving_average = 0.
@@ -40,12 +41,14 @@ class BuyIndicator:
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         scores = self.fib_trader.compute(candles)
+        stability = self.stability.compute(candles)
         scores = scores[scores > 0.]
         score_sum = scores.sum()
         self.score_moving_average *= self.alpha
         self.score_moving_average += (1 - self.alpha) * score_sum
-        scores = scores / max(self.score_moving_average, score_sum)
-        return scores[scores.notna()]
+        weights = scores / max(self.score_moving_average, score_sum)
+        stability_adjusted_weights = weights * stability
+        return stability_adjusted_weights.dropna()
 
 
 class SellIndicator:
@@ -77,7 +80,7 @@ def main() -> None:
                                    api_url=coinbase_settings.API_URL)
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
-    cool_down = VolatilityCoolDown(period=timedelta(minutes=0))
+    cool_down = VolatilityCoolDown(buy_period=timedelta(minutes=0))
     buy_indicator = BuyIndicator(A, B)
     sell_indicator = SellIndicator(A, B)
     volume_indicator = TrailingVolume(periods=A + B)

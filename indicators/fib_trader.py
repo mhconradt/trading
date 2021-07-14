@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
-from indicators.trend_follower import TrendFollower
 
+from indicators.acceleration import TrendAcceleration
 from indicators.momentum import Momentum
 from indicators.trend_stability import TrendStability
 from indicators.volume import TrailingQuoteVolume
@@ -16,7 +16,7 @@ class FibTrader:
         self.a = a
         self.b = b
         self.periods = a + b
-        self.acceleration = TrendFollower(a=self.a, b=self.b, trend_sign=1)
+        self.acceleration = TrendAcceleration(a=self.a, b=self.b, trend_sign=1)
         self.stability = TrendStability(self.periods)
         self.momentum = Momentum(self.periods)
         self.quote_volume = TrailingQuoteVolume(self.periods)
@@ -39,7 +39,7 @@ class FibTrader:
         mask = combine_momentum(a_mom) > 0.001
         net_momentum = np.maximum(overall, 0.)
         net_strength = np.log2(np.maximum(strength, 1.))  # avoid zero division
-        score = (net_strength * stability * net_momentum)
+        score = net_strength * stability * net_momentum * log_volume
         score = score.loc[mask[mask].index]
         analysis = pd.DataFrame(
             {'strength': net_strength, 'stability': stability,

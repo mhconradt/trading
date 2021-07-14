@@ -48,7 +48,7 @@ def main():
         start = time.time()
         candles = src.compute()
         values = quote_volume.compute(candles)
-        print(values)
+        print(values.isna().any())
         values = volume.compute(candles)
         print(values)
         total += time.time() - start

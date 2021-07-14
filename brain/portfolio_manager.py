@@ -105,7 +105,8 @@ class PortfolioManager:
         self.min_position_size = Decimal('0')
         self.max_positions = 256
 
-        self.spend_fraction = Decimal('0.05')
+        self.sell_increment = Decimal('0.05')
+        self.buy_increment = Decimal('0.02')
 
         self.pop_limit = Decimal('0.25')
         self.pov_limit = Decimal('0.2')
@@ -140,7 +141,7 @@ class PortfolioManager:
         self.prices: t.Optional[Series] = None
         self.volume: t.Optional[Series] = None
         self.buy_weights: t.Optional[Series] = None
-        self.sell_fractions = t.Optional[Series] = None
+        self.sell_fractions: t.Optional[Series] = None
 
         self.market_info: t.Optional[t.Dict[str, dict]] = None
         self.taker_fee: t.Optional[Decimal] = None
@@ -168,7 +169,12 @@ class PortfolioManager:
         self.liquidate_on_shutdown = liquidate_on_shutdown
         self.stop = False
 
-    def calculate_market_base_sizes(self) -> pd.Series:
+    def calculate_aum(self) -> Decimal:
+        quote_sizes = self.calculate_market_quote_sizes()
+        total_size = quote_sizes.sum()
+        return total_size + self.portfolio_available_funds
+
+    def calculate_market_quote_sizes(self) -> pd.Series:
         sizes = defaultdict(lambda: Decimal('0'))
         positions = it.chain(self.desired_limit_buys, self.pending_limit_buys,
                              self.desired_market_buys,
@@ -177,16 +183,12 @@ class PortfolioManager:
                              self.desired_limit_sells,
                              self.desired_market_sells)
         for position in positions:
-            sizes[position.market] += position.size
+            if isinstance(position, (PendingMarketBuy, DesiredMarketBuy)):
+                sizes[position.market] += position.funds
+            else:
+                price = self.prices[position.market]
+                sizes[position.market] += position.size * price
         return Series({market: sizes[market] for market in self.market_info})
-
-    def calculate_aum(self) -> Decimal:
-        quote_sizes = self.calculate_market_quote_sizes()
-        total_size = quote_sizes.sum()
-        return total_size + self.portfolio_available_funds
-
-    def calculate_market_quote_sizes(self) -> pd.Series:
-        return self.calculate_market_base_sizes() * self.prices
 
     def calculate_spending_limits(self) -> pd.Series:
         """
@@ -219,7 +221,7 @@ class PortfolioManager:
         """
         base_size_limits = self.volume * self.pov_limit
         quote_size_limits = self.prices * base_size_limits
-        return quote_size_limits
+        return quote_size_limits.fillna(Decimal('0'))
 
     def calculate_aum_size_limit(self) -> Decimal:
         """
@@ -283,8 +285,8 @@ class PortfolioManager:
         Don't queue if would put market above market_percentage_limit.
         Don't queue if would violate volatility cooldown.
         """
-        starting_budget = self.portfolio_available_funds * self.spend_fraction
-        spending_limit = starting_budget / (Decimal('1') + self.taker_fee)
+        budget = self.portfolio_available_funds * self.buy_increment
+        spending_limit = budget / (Decimal('1') + self.taker_fee)
         weights = self.limit_weights(self.buy_weights, spending_limit)
         decimal_weights = weights.map(Decimal)
         for market, weight in decimal_weights.iteritems():
@@ -339,7 +341,7 @@ class PortfolioManager:
             if funds < min_funds:
                 self.counter.decrement()
                 continue
-            max_funds = Decimal(info['market_max_funds'])
+            max_funds = Decimal(info['max_market_funds'])
             funds = min(funds, max_funds)
             order = self.client.retryable_market_order(market, side='buy',
                                                        funds=str(funds))
@@ -521,6 +523,9 @@ class PortfolioManager:
             elif status == 'done':
                 self.tracker.forget(order_id)
                 size = Decimal(order['filled_size'])
+                if not size:
+                    self.counter.decrement()
+                    continue
                 price = Decimal(order['executed_value']) / size
                 fee = Decimal(order['fill_fees'])
                 # place stop loss order
@@ -534,7 +539,7 @@ class PortfolioManager:
                 logger.info(f"{active_position}")
                 self.active_positions.append(active_position)
             else:
-                logger.warning(f"Unknown status {status}.")
+                logger.warning(f"Unknown status {status} for order {order}.")
                 logger.debug(order)
                 next_generation.append(pending_buy)
                 continue
@@ -567,7 +572,7 @@ class PortfolioManager:
                 self.counter.decrement()
                 continue
             increment = Decimal(market_info['base_increment'])
-            sell_fraction = self.sell_fractions[market] * self.spend_fraction
+            sell_fraction = self.sell_fractions[market] * self.sell_increment
             sell_size = compute_sell_size(position.size,
                                           sell_fraction,
                                           min_size,
@@ -576,8 +581,8 @@ class PortfolioManager:
             if sell_size:
                 if remainder:
                     self.counter.increment()
-                fraction = sell_size / position.size
-                state_change = f'sell {fraction:.3f}' if remainder else 'sell'
+                sell_fraction = sell_size / position.size
+                state_change = f'sell {sell_fraction:.3f}' if remainder else 'sell'
                 if self.sell_order_type == 'limit' and market in self.prices:
                     sell = DesiredLimitSell(size=sell_size,
                                             price=self.prices.loc[market],
@@ -719,14 +724,16 @@ class PortfolioManager:
             quote_increment = Decimal(market_info['quote_increment'])
             price = sell.price.quantize(quote_increment, rounding='ROUND_DOWN')
             post_only = market_info['post_only']
-            tif = self.sell_time_in_force
-            order = self.client.retryable_limit_order(sell.market,
-                                                      side='sell',
-                                                      price=str(price),
-                                                      size=str(sell.size),
-                                                      time_in_force=tif,
-                                                      stp='co',
-                                                      post_only=post_only)
+            tif = 'GTC' if post_only else self.sell_time_in_force
+            kwargs = dict(product_id=sell.market,
+                          side='sell',
+                          price=str(price),
+                          size=str(sell.size),
+                          time_in_force=tif,
+                          stp='co')
+            if post_only:
+                kwargs['post_only'] = post_only
+            order = self.client.retryable_limit_order(**kwargs)
             if 'id' not in order:
                 next_generation.append(sell)
                 logger.debug(f"Place order error message {order} {sell}")
@@ -1015,7 +1022,7 @@ class PortfolioManager:
         self.check_active_positions()
         self.check_cancel_buys()
         self.check_pending_limit_buys()
-        self.check_desired_market_buys()
+        self.check_pending_market_buys()
         self.check_desired_limit_buys()
         self.check_desired_market_buys()
 

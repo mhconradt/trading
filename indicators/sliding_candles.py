@@ -76,23 +76,23 @@ class CandleSticks:
         return candles
 
 
-def main(influx: InfluxDBClient):
+def main():
     import time
-    candles = CandleSticks(influx, 'coinbasepro', 6, timedelta(minutes=1))
-    total = 0.
-    times = []
-    for i in range(7):
-        start = time.time()
-        values = candles.compute()
-        times.append(time.time() - start)
-    print(pd.Series(times, name='times').describe())
 
-
-if __name__ == '__main__':
     from settings import influx_db as influx_db_settings
 
     influx_client = InfluxDBClient(influx_db_settings.INFLUX_URL,
                                    influx_db_settings.INFLUX_TOKEN,
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG)
-    main(influx_client)
+    candles = CandleSticks(influx_client, 'coinbasepro', 6,
+                           timedelta(minutes=1))
+    while True:
+        start = time.time()
+        values = candles.compute()
+        print(values)
+        print(f"Took {time.time() - start:.2f}s")
+
+
+if __name__ == '__main__':
+    main()

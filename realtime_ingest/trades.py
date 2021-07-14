@@ -79,39 +79,43 @@ class TradesWebsocketClient(cbpro.WebsocketClient):
         pass
 
     def on_message(self, msg: dict) -> None:
-        msg_type = msg['type']
-        if msg_type not in {'match', 'last_match'}:
-            return None
-        trade = msg  # message is a trade now
-        product = trade['product_id']
-        trade_id = trade['trade_id']
-        watermark = self.watermarks.get(product)
-        # all markets are now being processed in order
-        needs_catch_up = watermark and trade_id > watermark + 1
-        all_caught_up = not (any(self.catching_up.values()) or needs_catch_up)
-        if not self.catching_up[product] and needs_catch_up:
-            self.replayed_missed_tasks = False
-        self.catching_up[product] = needs_catch_up
-        if needs_catch_up:
-            print(f'catching up {product} {watermark}->{trade_id}')
-            gap = catchup(product, watermark, trade_id)
-            for item in gap:
-                self.checkpoint_start = min(self.checkpoint_start,
-                                            item['time'])
-                self.sink.send(item)
-            print(f'caught up {product}')
-        self.sink.send(trade)
-        self.watermarks[product] = trade_id
-        self.checkpoint_start = min(self.checkpoint_start, trade['time'])
-        self.checkpoint_end = max(trade['time'],
+        try:
+            msg_type = msg['type']
+            if msg_type not in {'match', 'last_match'}:
+                return None
+            trade = msg  # message is a trade now
+            product = trade['product_id']
+            trade_id = trade['trade_id']
+            watermark = self.watermarks.get(product)
+            # all markets are now being processed in order
+            needs_catch_up = watermark and trade_id > watermark + 1
+            all_caught_up = not (
+                        any(self.catching_up.values()) or needs_catch_up)
+            if not self.catching_up[product] and needs_catch_up:
+                self.replayed_missed_tasks = False
+            self.catching_up[product] = needs_catch_up
+            if needs_catch_up:
+                print(f'catching up {product} {watermark}->{trade_id}')
+                gap = catchup(product, watermark, trade_id)
+                for item in gap:
+                    self.checkpoint_start = min(self.checkpoint_start,
+                                                item['time'])
+                    self.sink.send(item)
+                print(f'caught up {product}')
+            self.sink.send(trade)
+            self.watermarks[product] = trade_id
+            self.checkpoint_start = min(self.checkpoint_start, trade['time'])
+            self.checkpoint_end = max(trade['time'],
+                                      self.checkpoint_end)
+            if not self.replayed_missed_tasks:
+                if all_caught_up and self.checkpoint_start != 'Z':
+                    print('replaying')
+                    replay.replay("matches", self.checkpoint_start,
                                   self.checkpoint_end)
-        if not self.replayed_missed_tasks:
-            if all_caught_up and self.checkpoint_start != 'Z':
-                print('replaying')
-                replay.replay("matches", self.checkpoint_start,
-                              self.checkpoint_end)
-                self.replayed_missed_tasks = True
-                self.checkpoint_start = 'Z'
+                    self.replayed_missed_tasks = True
+                    self.checkpoint_start = 'Z'
+        except (Exception,):
+            self.stop = True
 
 
 def main() -> None:

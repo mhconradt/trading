@@ -56,7 +56,7 @@ class SyncCoinbaseOrderTracker(OrderTracker):
                     index -= 1
                     snapshot[order_id] = order
                     break
-                elif order_id not in watched_items:
+                elif order_id not in watched_items and i:
                     # ignore this order
                     break
                 else:

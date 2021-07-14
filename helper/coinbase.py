@@ -86,6 +86,7 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
                      self).place_market_order(product_id,
                                               side=side,
                                               size=size,
+                                              funds=funds,
                                               client_oid=client_oid,
                                               stp=stp,
                                               overdraft_enabled=False,

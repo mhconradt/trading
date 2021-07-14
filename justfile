@@ -1,7 +1,7 @@
 trader_image := "565925249289.dkr.ecr.us-east-1.amazonaws.com/trader"
 ingestion_image := "565925249289.dkr.ecr.us-east-1.amazonaws.com/trade-ingestion"
 
-version := "1.5.0"
+version := "1.5.18"
 
 
 deploy_trader:
