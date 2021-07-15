@@ -1,4 +1,5 @@
 import json
+import time
 import typing as t
 from datetime import datetime
 from uuid import uuid4
@@ -7,7 +8,6 @@ import cbpro
 import dateutil.parser
 import requests
 from ratelimit import rate_limited, sleep_and_retry
-from retry import retry
 
 
 @sleep_and_retry
@@ -23,12 +23,10 @@ def wait_for_public_rate_limit() -> None:
 
 
 class PublicClient(cbpro.PublicClient):
-    @retry(requests.RequestException, tries=3, delay=15)
     def get_products(self) -> t.List[dict]:
         wait_for_public_rate_limit()
         return super(PublicClient, self).get_products()
 
-    @retry(requests.RequestException, tries=3, delay=15)
     def get_time(self) -> dict:
         wait_for_public_rate_limit()
         return super(PublicClient, self).get_time()
@@ -40,16 +38,38 @@ class PublicClient(cbpro.PublicClient):
                                                             after, limit,
                                                             result)
 
+    def _reset_session(self) -> None:
+        self.session = requests.Session()
 
-# TODO: Retry paginated message
+    def _send_message(self, method, endpoint, params=None, data=None):
+        retryable = method == 'GET' or method == 'DELETE'
+        while True:
+            try:
+                url = self.url + endpoint
+                r = self.session.request(method, url, params=params, data=data,
+                                         auth=self.auth, timeout=30)
+                if r.status_code >= 500 and retryable:
+                    self._reset_session()
+                    time.sleep(1)
+                    continue
+                elif r.status_code == 429:
+                    time.sleep(1)
+                    continue
+                return r.json()
+            except requests.RequestException as e:
+                self._reset_session()
+                time.sleep(1)
+                if retryable:
+                    continue
+                else:
+                    raise e  # need to implement retry logic elsewhere
+
 
 class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
-    @retry(requests.RequestException, tries=3, delay=15)
     def get_accounts(self) -> t.List[dict]:
         wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).get_accounts()
 
-    @retry(requests.RequestException, tries=3, delay=15)
     def get_account(self, account_id) -> dict:
         wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).get_account(account_id)
@@ -92,34 +112,28 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
                                               overdraft_enabled=False,
                                               funding_amount=funding_amount)
 
-    @retry(requests.RequestException, tries=3, delay=15)
     def cancel_order(self, order_id) -> t.List[str]:
         wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).cancel_order(order_id)
 
-    @retry(requests.RequestException, tries=3, delay=15)
     def cancel_all(self, product_id=None):
         wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).cancel_all(product_id)
 
-    @retry(requests.RequestException, tries=3, delay=15)
     def get_order(self, order_id) -> dict:
         wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).get_order(order_id)
 
-    @retry(requests.RequestException, tries=3, delay=15)
     def get_orders(self, product_id=None, status=None,
                    **kwargs) -> t.Iterator[dict]:
         wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).get_orders(product_id,
                                                            status=status)
 
-    @retry(requests.RequestException, tries=3, delay=15)
     def get_fees(self) -> dict:
         wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self)._send_message('GET', '/fees')
 
-    @retry(requests.RequestException, tries=3, delay=15)
     def get_order_by_client_oid(self, client_oid: str) -> t.Optional[dict]:
         wait_for_authenticated_rate_limit()
         url = f'{self.url}/orders/client:{client_oid}'
@@ -129,7 +143,6 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
         else:
             return None
 
-    @retry(requests.RequestException, tries=3, delay=15)
     def retryable_market_order(self, *args,
                                **kwargs) -> dict:
         client_oid = kwargs.get('client_oid', str(uuid4()))
@@ -142,7 +155,6 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
             else:
                 raise e
 
-    @retry(requests.RequestException, tries=3, delay=15)
     def retryable_limit_order(self, *args,
                               **kwargs) -> dict:
         client_oid = kwargs.get('client_oid', str(uuid4()))
@@ -159,7 +171,6 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
 public_client = PublicClient()
 
 
-@retry(requests.RequestException, tries=3, delay=15)
 def get_usd_products() -> t.List[dict]:
     products = public_client.get_products()
     return [product for product in products if
@@ -170,7 +181,6 @@ def get_usd_product_ids() -> t.List[str]:
     return [product['id'] for product in get_usd_products()]
 
 
-@retry(requests.RequestException, tries=3, delay=15)
 def get_server_time() -> datetime:
     while True:
         try:
