@@ -34,10 +34,10 @@ class FibTrader:
         momentum = self.momentum.compute(candles)
         volume = self.quote_volume.compute(candles)
         log_volume = np.log10(volume)
-        overall = combine_momentum(momentum)
+        most_recent_mom = momentum.iloc[-1]
         a_mom, b_mom = momentum.iloc[:self.a], momentum.iloc[-self.b:]
         mask = combine_momentum(a_mom) > 0.001
-        net_momentum = np.maximum(overall, 0.)
+        net_momentum = np.maximum(most_recent_mom, 0.)
         net_strength = np.log2(np.maximum(strength, 1.))  # avoid zero division
         score = net_strength * stability * net_momentum * log_volume
         score = score.loc[mask[mask].index]

@@ -22,6 +22,8 @@ def wait_for_public_rate_limit() -> None:
     pass
 
 
+# NOTE: There is still no rate limit on paginated messages
+
 class PublicClient(cbpro.PublicClient):
     def get_products(self) -> t.List[dict]:
         wait_for_public_rate_limit()
