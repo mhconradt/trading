@@ -60,19 +60,18 @@ class BuyIndicator:
 class SellIndicator:
     def __init__(self, a: int, b: int):
         self.acceleration = TrendAcceleration(a, b, momentum_mode='close')
-        self.stability = TrendStability(a + b)
-        self.k = 1
 
     @property
     def periods_required(self) -> int:
-        return max(self.acceleration.periods_required,
-                   self.stability.periods_required)
+        return self.acceleration.periods_required
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
-        stability = self.stability.compute(candles)
         acceleration = self.acceleration.compute(candles)
-        fraction = np.maximum(0., np.minimum(1., (acceleration - 1) / -2))
-        return (fraction * (self.k + stability)).fillna(1.)
+        deceleration = np.maximum(0., np.minimum(2., -(acceleration - 1)))
+        slowdown_fraction = deceleration * (1 / 3)
+        reversal_fraction = np.maximum(0., deceleration - 1.) * (1 / 3)
+        fraction = slowdown_fraction + reversal_fraction
+        return fraction.fillna(1.)
 
 
 def main() -> None:
@@ -106,8 +105,7 @@ def main() -> None:
                                cool_down=cool_down, liquidate_on_shutdown=True,
                                market_blacklist={'USDT-USD', 'DAI-USD'},
                                stop_loss=stop_loss, sell_order_type='market',
-                               buy_order_type='market',
-                               buy_time_in_force='FOK')
+                               buy_order_type='market')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()

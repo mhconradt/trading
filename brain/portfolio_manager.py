@@ -80,10 +80,10 @@ def compute_sell_size(size: Decimal, fraction: Decimal,
         return l1_sell_size
 
 
-def compute_increment(target: float, over: timedelta,
-                      period: timedelta) -> float:
-    periods = over.total_seconds() / period.total_seconds()
-    return target ** (1 / periods)
+def convert_rate(from_rate: float, from_t: timedelta,
+                 to_t: timedelta) -> float:
+    periods = from_t.total_seconds() / to_t.total_seconds()
+    return from_rate ** (1 / periods)
 
 
 class PortfolioManager:
@@ -99,7 +99,7 @@ class PortfolioManager:
                  buy_order_type: str = 'limit',
                  buy_time_in_force: str = 'GTC',
                  buy_half_life=timedelta(seconds=120),
-                 sell_half_life=timedelta(seconds=30)):
+                 sell_half_life=timedelta(seconds=15)):
         self.buy_half_life = buy_half_life
         self.sell_half_life = sell_half_life
         self.initialized = False
@@ -556,7 +556,7 @@ class PortfolioManager:
             if position.market in accumulators:
                 accumulator = accumulators[position.market]
                 both = accumulator.merge(position)
-                print(f"{position} + {accumulator} = {both}")
+                logger.debug(f"merge: {position} + {accumulator} = {both}")
                 accumulators[position.market] = both
             else:
                 accumulators[position.market] = position
@@ -574,17 +574,21 @@ class PortfolioManager:
             market = position.market
             market_info = self.market_info[market]
             min_size = Decimal(market_info['base_min_size'])
+            logger.debug(f"checking {position}")
             if position.size < min_size:
                 self.counter.decrement()
                 continue
             increment = Decimal(market_info['base_increment'])
             sell_fraction = self.sell_fractions[market] * self.sell_increment
+            logger.debug(f"{sell_fraction} = "
+                         f"{self.sell_fractions[market]} * "
+                         f"{self.sell_increment}")
             sell_size = compute_sell_size(position.size,
                                           sell_fraction,
                                           min_size,
                                           increment)
             remainder = position.size - sell_size
-            logger.debug(f"{position.size} - {sell_size} = {remainder}")
+            logger.debug(f"sell: {position.size} - {sell_size} = {remainder}")
             if sell_size:
                 if remainder:
                     self.counter.increment()
@@ -611,6 +615,7 @@ class PortfolioManager:
                 next_position = position.drawdown_clone(remainder)
                 next_generation.append(next_position)
             else:
+                logger.debug(f"dropping position {position}")
                 self.cool_down.sold(market)
         self.active_positions = next_generation
 
@@ -945,12 +950,12 @@ class PortfolioManager:
             tick_duration = tick_time - last_tick_time
             buy_half_life = self.buy_half_life
             buy_target = 1. - float(self.pop_limit)
-            buy_increment = 1. - compute_increment(buy_target, buy_half_life,
-                                                   tick_duration)
+            buy_increment = 1. - convert_rate(buy_target, buy_half_life,
+                                              tick_duration)
             self.buy_increment = Decimal(buy_increment)
             sell_half_life = self.sell_half_life
-            sell_increment = 1. - compute_increment(.5, sell_half_life,
-                                                    tick_duration)
+            sell_increment = 1. - convert_rate(.5, sell_half_life,
+                                               tick_duration)
             self.sell_increment = Decimal(sell_increment)
 
     def set_market_info(self) -> None:
