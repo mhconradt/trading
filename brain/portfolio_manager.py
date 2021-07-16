@@ -641,7 +641,7 @@ class PortfolioManager:
             order = self.client.retryable_market_order(sell.market,
                                                        side='sell',
                                                        size=str(size),
-                                                       stp='co')
+                                                       stp='cb')
             if 'id' not in order:
                 next_generation.append(sell)  # neanderthal retry
                 logger.warning(f"Place order error message {order} {sell}")
