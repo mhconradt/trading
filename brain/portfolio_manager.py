@@ -29,6 +29,48 @@ from indicators.protocols import InstantIndicator
 logger = logging.getLogger(__name__)
 
 
+def overlapping_labels(a: pd.Series,
+                       b: pd.Series) -> t.Tuple[pd.Series, pd.Series]:
+    intersection = a.index.intersection(b.index)
+    return a.loc[intersection], b.loc[intersection]
+
+
+def apply_limit_size_limit(n: float, weights: pd.Series, prices: pd.Series,
+                           min_sizes: pd.Series) -> pd.Series:
+    total_weight = np.sum(weights)
+    sorted_weights = weights.sort_values(ascending=False)
+    max_above_limit, best_weights = 0, pd.Series([], dtype=np.float64)
+    for market in sorted_weights.index:
+        these_weights = sorted_weights.loc[:market]
+        these_weights = these_weights / these_weights.sum() * total_weight
+        these_amounts = these_weights * n
+        these_sizes = these_amounts / prices
+        these_sizes, min_sizes = overlapping_labels(these_sizes, min_sizes)
+        above_limit = these_amounts[these_sizes > min_sizes]
+        if len(above_limit) > max_above_limit:
+            max_above_limit = len(above_limit)
+            best_weights = above_limit / above_limit.sum() * total_weight
+    return best_weights
+
+
+def apply_market_size_limit(n: float, weights: pd.Series,
+                            min_market_funds: pd.Series) -> pd.Series:
+    total_weight = np.sum(weights)
+    sorted_weights = weights.sort_values(ascending=False)
+    max_above_limit, best_weights = 0, pd.Series([], dtype=np.float64)
+    for market in sorted_weights.index:
+        these_weights = sorted_weights.loc[:market]
+        these_weights = these_weights / these_weights.sum() * total_weight
+        these_amounts = these_weights * n
+        these_amounts, min_market_funds = overlapping_labels(these_amounts,
+                                                             min_market_funds)
+        above_limit = these_amounts[these_amounts > min_market_funds]
+        if len(above_limit) > max_above_limit:
+            max_above_limit = len(above_limit)
+            best_weights = above_limit / above_limit.sum() * total_weight
+    return best_weights
+
+
 def compute_l1_sell_size(size: Decimal, fraction: Decimal,
                          min_size: Decimal, increment: Decimal) -> Decimal:
     """
@@ -93,7 +135,7 @@ class PortfolioManager:
                  buy_order_type: str = 'limit',
                  buy_time_in_force: str = 'GTC',
                  buy_half_life=timedelta(seconds=120),
-                 sell_half_life=timedelta(seconds=15)):
+                 sell_half_life=timedelta(seconds=10)):
         self.buy_half_life = buy_half_life
         self.sell_half_life = sell_half_life
         self.initialized = False
@@ -255,6 +297,24 @@ class PortfolioManager:
         weights = weights[weights.notna() & weights.gt(0.)]
         return weights
 
+    def apply_exchange_size_limits(self, weights: pd.Series,
+                                   spending_limit: Decimal) -> pd.Series:
+        n = float(spending_limit)
+        weights = weights.map(float)
+        if self.buy_order_type == 'market':
+            min_market_funds = pd.Series(
+                {product: float(info['min_market_funds'])
+                 for product, info in self.market_info.items()})
+            weights = apply_market_size_limit(n, weights, min_market_funds)
+        else:
+            base_min_sizes = pd.Series(
+                {product: float(info['base_min_size'])
+                 for product, info in self.market_info.items()})
+            weights = apply_limit_size_limit(n, weights,
+                                             self.prices.map(float),
+                                             base_min_sizes)
+        return weights.map(Decimal)
+
     def limit_weights(self, target_weights: Series,
                       spending_limit: Decimal) -> Series:
         nil_weights = Series([], dtype=np.float64)
@@ -278,6 +338,7 @@ class PortfolioManager:
         position_count_limit = self.max_positions - self.counter.count
         ranked_weights = limited_weights.sort_values(ascending=False)
         weights = ranked_weights.head(position_count_limit)
+        weights = self.apply_exchange_size_limits(weights, spending_limit)
         logger.debug(weights)
         return weights
 
