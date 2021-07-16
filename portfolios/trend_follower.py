@@ -50,8 +50,13 @@ class BuyIndicator:
         scores = scores[scores > 0.]
         scores = scores.loc[scores.index.intersection(pos_roc.index)]
         score_sum = scores.sum()
-        self.score_moving_average *= self.alpha
-        self.score_moving_average += (1 - self.alpha) * score_sum
+        if score_sum > self.score_moving_average:
+            alpha = self.alpha ** 2
+            self.score_moving_average *= alpha
+            self.score_moving_average += (1 - alpha) * score_sum
+        elif score_sum > 0.:
+            self.score_moving_average *= self.alpha
+            self.score_moving_average += (1 - self.alpha) * score_sum
         weights = scores / max(self.score_moving_average, score_sum)
         stability_adjusted_weights = weights * stability
         return stability_adjusted_weights.dropna()
@@ -60,6 +65,7 @@ class BuyIndicator:
 class SellIndicator:
     def __init__(self, a: int, b: int):
         self.acceleration = TrendAcceleration(a, b, momentum_mode='close')
+        self.stability = TrendStability(a + b)
 
     @property
     def periods_required(self) -> int:
@@ -67,9 +73,11 @@ class SellIndicator:
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         acceleration = self.acceleration.compute(candles)
+        stability = self.stability.compute(candles)
         deceleration = np.maximum(0., np.minimum(2., -(acceleration - 1)))
         fraction = deceleration / 2
-        return fraction.fillna(1.)
+        instability = 1 - stability
+        return (fraction * (1 + instability) / 2).fillna(1.)
 
 
 def main() -> None:
