@@ -8,18 +8,21 @@ from exceptions import StaleDataException
 
 class CandleSticks:
     def __init__(self, db: InfluxDBClient, exchange: str, periods: int,
-                 frequency: timedelta):
+                 frequency: timedelta, offset=0):
         self.db = db
         self.frequency = frequency
         self.exchange = exchange
         self.periods = periods
+        self.offset = offset
 
     def compute(self) -> pd.DataFrame:
         query_api = self.db.query_api()
-        start = -self.periods * self.frequency
+        start = -(self.periods + self.offset) * self.frequency
+        stop = -self.offset * self.frequency
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
-                      'start': start}
+                      'start': start,
+                      'stop': stop}
         raw_df = query_api.query_data_frame("""
             import "date"
             
@@ -27,7 +30,7 @@ class CandleSticks:
                                                      unit: freq)))    
 
             trades = from(bucket: "trades")
-                |> range(start: start)
+                |> range(start: start, stop: stop)
                 |> filter(fn: (r) => r["_measurement"] == "matches")
                 |> filter(fn: (r) => r["_field"] == "price" 
                                      or r["_field"] == "size")
@@ -73,6 +76,9 @@ class CandleSticks:
         if isinstance(raw_df, list):
             raw_df = pd.concat(raw_df)
         candles = raw_df['_value'].unstack('result')
+        times = candles.index.levels[candles.index.names.index('_start')]
+        if times.nunique() < self.periods:
+            raise StaleDataException("Insufficient data.")
         return candles
 
 

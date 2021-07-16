@@ -43,8 +43,6 @@ class SyncCoinbaseOrderTracker(OrderTracker):
         return timestamp, self.snapshot()
 
     def snapshot(self) -> dict:
-        index = len(self.watchlist) - 1
-        watched_items = set(self.watchlist)
         snapshot = {}
         for order_id in self.watchlist:
             order = self.client.get_order(order_id)
