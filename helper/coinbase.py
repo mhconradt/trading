@@ -9,6 +9,8 @@ import dateutil.parser
 import requests
 from ratelimit import rate_limited, sleep_and_retry
 
+from exceptions import InternalServerError
+
 
 @sleep_and_retry
 @rate_limited(period=1, calls=15)
@@ -44,6 +46,7 @@ class PublicClient(cbpro.PublicClient):
         self.session = requests.Session()
 
     def _send_message(self, method, endpoint, params=None, data=None):
+        method = method.upper()
         retryable = method == 'GET' or method == 'DELETE'
         while True:
             try:
@@ -54,6 +57,8 @@ class PublicClient(cbpro.PublicClient):
                     self._reset_session()
                     time.sleep(1)
                     continue
+                elif r.status_code >= 500:
+                    raise InternalServerError()
                 elif r.status_code == 429:
                     time.sleep(1)
                     continue
@@ -149,25 +154,33 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
                                **kwargs) -> dict:
         client_oid = kwargs.get('client_oid', str(uuid4()))
         kwargs['client_oid'] = client_oid
-        try:
-            return self.place_market_order(*args, **kwargs)
-        except requests.RequestException as e:
-            if order := self.get_order_by_client_oid(client_oid):
-                return order
-            else:
-                raise e
+        tries = 0
+        while True:
+            try:
+                return self.place_market_order(*args, **kwargs)
+            except (requests.RequestException, InternalServerError) as e:
+                if order := self.get_order_by_client_oid(client_oid):
+                    return order
+                else:
+                    tries += 1
+                    if tries >= kwargs.get('tries', 2):
+                        raise e
 
     def retryable_limit_order(self, *args,
                               **kwargs) -> dict:
         client_oid = kwargs.get('client_oid', str(uuid4()))
         kwargs['client_oid'] = client_oid
-        try:
-            return self.place_limit_order(*args, **kwargs)
-        except requests.RequestException as e:
-            if order := self.get_order_by_client_oid(client_oid):
-                return order
-            else:
-                raise e
+        tries = 0
+        while True:
+            try:
+                return self.place_limit_order(*args, **kwargs)
+            except (requests.RequestException, InternalServerError) as e:
+                if order := self.get_order_by_client_oid(client_oid):
+                    return order
+                else:
+                    tries += 1
+                    if tries >= kwargs.get('tries', 2):
+                        raise e
 
 
 public_client = PublicClient()

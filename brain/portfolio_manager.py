@@ -571,7 +571,7 @@ class PortfolioManager:
             min_size = Decimal(market_info['base_min_size'])
             logger.debug(position)
             if position.size < min_size:
-                self.counter.decrement()
+                next_generation.append(position)
                 continue
             increment = Decimal(market_info['base_increment'])
             sell_fraction = self.sell_fractions[market] * self.sell_increment
@@ -641,10 +641,9 @@ class PortfolioManager:
             order = self.client.retryable_market_order(sell.market,
                                                        side='sell',
                                                        size=str(size),
-                                                       stp='cb')
+                                                       stp='dc')
             if 'id' not in order:
-                next_generation.append(sell)  # neanderthal retry
-                logger.warning(f"Place order error message {order} {sell}")
+                logger.warning(f"Error placing order {order} {sell}")
                 continue
             order_id = order['id']
             self.tracker.remember(order_id)
@@ -740,8 +739,7 @@ class PortfolioManager:
                 kwargs['post_only'] = post_only
             order = self.client.retryable_limit_order(**kwargs)
             if 'id' not in order:
-                next_generation.append(sell)
-                logger.debug(f"Place order error message {order} {sell}")
+                logger.debug(f"Error placing order {order} {sell}")
                 continue
             order_id = order['id']
             self.tracker.remember(order_id)
