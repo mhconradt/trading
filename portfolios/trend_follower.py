@@ -68,9 +68,7 @@ class SellIndicator:
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         acceleration = self.acceleration.compute(candles)
         deceleration = np.maximum(0., np.minimum(2., -(acceleration - 1)))
-        slowdown_fraction = deceleration * (1 / 3)
-        reversal_fraction = np.maximum(0., deceleration - 1.) * (1 / 3)
-        fraction = slowdown_fraction + reversal_fraction
+        fraction = deceleration / 2
         return fraction.fillna(1.)
 
 
