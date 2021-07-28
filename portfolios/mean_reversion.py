@@ -11,10 +11,10 @@ from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import AuthenticatedClient
-from indicators import Ticker, TrailingVolume, TrendAcceleration, \
-    TrendStability, Momentum
-from indicators.fib_trader import FibTrader
-from indicators.sliding_candles import CandleSticks
+from indicators import Ticker, TrailingVolume
+from indicators.candles import CandleSticks
+from indicators.ema import TripleEMA
+from indicators.volume import SplitQuoteVolume
 from settings import influx_db as influx_db_settings, \
     coinbase as coinbase_settings, portfolio as portfolio_settings
 
@@ -26,54 +26,44 @@ logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
                     level=logging.DEBUG)
 
 
-class BuyIndicator:
-    def __init__(self, a: int, b: int):
-        self.a = a
-        self.b = b
-        self.stability = TrendStability(periods=self.a + self.b)
-        self.fib_trader = FibTrader(a, b)
-        self.momentum = Momentum(periods=1, span=15)
-        self.alpha = 0.995
-        self.score_moving_average = 0.
+class MeanReversionBuy:
+    def __init__(self, db: InfluxDBClient, periods: int = 26,
+                 frequency: timedelta = timedelta(minutes=1)):
+        self.threshold = 0.001
+        self.periods = periods
+        self.ema = TripleEMA(db, periods, frequency)
+        self.split_quote_volume = SplitQuoteVolume(db, 5, frequency, 'buy')
 
     @property
     def periods_required(self) -> int:
-        return max(self.fib_trader.periods_required,
-                   self.stability.periods_required,
-                   self.momentum.periods_required)
+        return 0
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
-        scores = self.fib_trader.compute(candles)
-        stability = self.stability.compute(candles)
-        roc = self.momentum.compute(candles).iloc[-1]
-        pos_roc = roc[roc > 0.]
-        scores = scores[scores > 0.]
-        scores = scores.loc[scores.index.intersection(pos_roc.index)]
-        score_sum = scores.sum()
-        if score_sum > 0.:
-            self.score_moving_average *= self.alpha
-            self.score_moving_average += (1 - self.alpha) * score_sum
-        weights = scores / max(self.score_moving_average, score_sum)
-        stability_adjusted_weights = weights * stability
-        return stability_adjusted_weights.dropna()
+        prices = candles.close.unstack('market').iloc[-1]
+        down_quote_volume = self.split_quote_volume.compute()
+        moving_averages = self.ema.compute()
+        below = 1 - (prices / moving_averages) > self.threshold
+        volume_fractions = down_quote_volume / down_quote_volume.sum()
+        return volume_fractions[below]
 
 
-class SellIndicator:
-    def __init__(self, a: int, b: int):
-        self.acceleration = TrendAcceleration(a, b, momentum_mode='close')
-        self.stability = TrendStability(a + b)
+class MeanReversionSell:
+    def __init__(self, db: InfluxDBClient, periods: int = 26,
+                 frequency: timedelta = timedelta(minutes=1)):
+        self.threshold = 0.001
+        self.periods = periods
+        self.ema = TripleEMA(db, periods, frequency)
 
     @property
     def periods_required(self) -> int:
-        return self.acceleration.periods_required
+        return 0
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
-        acceleration = self.acceleration.compute(candles)
-        stability = self.stability.compute(candles)
-        deceleration = np.maximum(0., np.minimum(2., -(acceleration - 1)))
-        fraction = deceleration / 2
-        instability = 1 - stability
-        return (fraction * (1 + instability) / 2).fillna(1.)
+        prices = candles.close.unstack('market').iloc[-1]
+        moving_averages = self.ema.compute()
+        above = moving_averages / prices - 1. > self.threshold
+        sells = above[above].index
+        return pd.Series(np.ones_like(sells), sells)
 
 
 def main() -> None:
@@ -88,9 +78,11 @@ def main() -> None:
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
     cool_down = VolatilityCoolDown(buy_period=timedelta(minutes=0))
-    buy_indicator = BuyIndicator(A, B)
-    sell_indicator = SellIndicator(A, B)
-    volume_indicator = TrailingVolume(periods=A + B)
+    buy_indicator = MeanReversionBuy(client, periods=26,
+                                     frequency=timedelta(minutes=1))
+    sell_indicator = MeanReversionSell(client, periods=26,
+                                       frequency=timedelta(minutes=1))
+    volume_indicator = TrailingVolume(periods=5)
     price_indicator = Ticker(A + B)
     candle_periods = max(buy_indicator.periods_required,
                          sell_indicator.periods_required,
@@ -98,7 +90,7 @@ def main() -> None:
                          volume_indicator.periods_required, )
     candles_src = CandleSticks(client, portfolio_settings.EXCHANGE,
                                candle_periods,
-                               timedelta(minutes=1))
+                               timedelta(minutes=1), offset=0)
     manager = PortfolioManager(coinbase, candles_src,
                                buy_indicator=buy_indicator,
                                sell_indicator=sell_indicator,

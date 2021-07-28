@@ -8,22 +8,23 @@ from exceptions import StaleDataException
 
 class CandleSticks:
     def __init__(self, db: InfluxDBClient, exchange: str, periods: int,
-                 frequency: timedelta):
+                 frequency: timedelta, offset: int):
         self.db = db
         self.frequency = frequency
         self.exchange = exchange
         self.periods = periods
+        self.offset = offset
 
     def compute(self) -> pd.DataFrame:
         query_api = self.db.query_api()
         lag_toleration = timedelta(seconds=15)
-        start = -(self.periods + 1) * self.frequency + lag_toleration
-        stop = timedelta(0)
+        start = -(
+                    self.periods + 1 + self.offset) * self.frequency + lag_toleration
+        stop = self.frequency * -self.offset
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
                       'start': start,
                       'stop': stop}
-        # catchup mechanism for candlesticks?
         df = query_api.query_data_frame("""
             from(bucket: "candles")
             |> range(start: start, stop: stop)
@@ -49,7 +50,7 @@ class CandleSticks:
 
 def main(influx: InfluxDBClient):
     import time
-    candles = CandleSticks(influx, 'coinbasepro', 5, timedelta(minutes=1))
+    candles = CandleSticks(influx, 'coinbasepro', 300, timedelta(minutes=1), 0)
     total = 0.
     measurements = 7
     for i in range(measurements):

@@ -91,7 +91,7 @@ def main():
                                    influx_db_settings.INFLUX_TOKEN,
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG)
-    candles = CandleSticks(influx_client, 'coinbasepro', 6,
+    candles = CandleSticks(influx_client, 'coinbasepro', 30,
                            timedelta(minutes=1))
     while True:
         start = time.time()

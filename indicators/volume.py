@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
@@ -28,9 +30,43 @@ class TrailingQuoteVolume:
         return candles.quote_volume.groupby(level='market').sum()
 
 
+class SplitQuoteVolume:
+    def __init__(self, db: InfluxDBClient, periods: int, frequency: timedelta,
+                 side: str):
+        self.db = db
+        self.side = side
+        self.periods = periods
+        self.frequency = frequency
+
+    def compute(self) -> pd.DataFrame:
+        query_api = self.db.query_api()
+        query = """
+            from(bucket: "trades")
+              |> range(start: start)
+              |> filter(fn: (r) => r["_measurement"] == "matches")
+              |> filter(fn: (r) => r["side"] == side)
+              |> filter(fn: (r) => r["_field"] == "price" or r["_field"] == "size")
+              |> pivot(columnKey: ["_field"],
+                       rowKey: ["_time", "market", "side"], 
+                       valueColumn: "_value")
+              |> map(fn: (r) => ({r with _value: r["price"] * r["size"]}))
+              |> sum()
+              |> pivot(columnKey: ["side"], 
+                       rowKey: ["market"], 
+                       valueColumn: "_value")
+              |> yield(name: "mean")
+        """
+        params = {'start': -1 * self.periods * self.frequency,
+                  'side': self.side}
+        raw_df = query_api.query_data_frame(query, params=params,
+                                            data_frame_index=['market'])
+        if isinstance(raw_df, list):
+            raw_df = pd.concat(raw_df)
+        return raw_df[['market', '_value']].set_index('market')
+
+
 def main():
     import time
-    from datetime import timedelta
 
     from settings import influx_db as influx_db_settings
     from indicators.sliding_candles import CandleSticks
