@@ -19,7 +19,7 @@ class RecordSink(ABC):
 
 
 class BatchingSink(RecordSink):
-    def __init__(self, capacity: int, sink: RecordSink):
+    def __init__(self, sink: RecordSink, capacity: int):
         self.capacity = capacity
         self.sink = sink
         self._batch = []
@@ -50,6 +50,33 @@ class Printer(RecordSink):
         print(records)
 
 
+class InfluxDBTickerSink(RecordSink):
+    def __init__(self, exchange: str, writer: WriteApi, *args, **kwargs):
+        self.exchange = exchange
+        self.point_sink = InfluxDBPointSink(writer, *args, **kwargs)
+
+    def send(self, ticker: dict, /) -> None:
+        point = self.build_point(ticker)
+        self.point_sink.send(point)
+
+    def send_many(self, tickers: t.Iterable[dict], /) -> None:
+        points = []
+        for trade in tickers:
+            p = self.build_point(trade)
+            points.append(p)
+        self.point_sink.send_many(points)
+
+    def build_point(self, ticker: dict) -> Point:
+        product = ticker['product_id']
+        timestamp = dateutil.parser.parse(ticker['time'])
+        return Point("tickers") \
+            .tag('exchange', self.exchange) \
+            .tag('market', product) \
+            .time(timestamp) \
+            .field('bid', Decimal(ticker['best_bid'])) \
+            .field('ask', Decimal(ticker['best_ask']))
+
+
 class InfluxDBTradeSink(RecordSink):
     def __init__(self, exchange: str, writer: WriteApi, *args, **kwargs):
         self.exchange = exchange
@@ -77,6 +104,7 @@ class InfluxDBTradeSink(RecordSink):
         return Point("matches") \
             .tag('exchange', self.exchange) \
             .tag('market', trade['product_id']) \
+            .tag('side', trade['side']) \
             .time(timestamp + timedelta(microseconds=salt)) \
             .field('price', Decimal(trade['price'])) \
             .field('size', Decimal(trade['size'])) \
@@ -118,7 +146,7 @@ def main() -> None:
             n += 1
             yield {'hello': 'world', 'n': n}
 
-    batched = BatchingSink(3, printer)
+    batched = BatchingSink(printer, 3)
     for record in it.islice(record_generator(), 11):
         time.sleep(1)
         batched.send(record)
