@@ -158,18 +158,6 @@ class TaskDefinition:
 
 candles_1m = TaskDefinition('trades', name='candles_1m', every='1m',
                             offset='5s', dst='candles')
-candles_5m = TaskDefinition('trades', name='candles_5m', every='5m',
-                            offset='5s', dst='candles')
-candles_15m = TaskDefinition('trades', name='candles_15m', every='15m',
-                             offset='5s', dst='candles')
-candles_1h = TaskDefinition('trades', name='candles_1h', every='1h',
-                            offset='5s', dst='candles')
-candles_6h = TaskDefinition('trades', name='candles_6h', every='6h',
-                            offset='5s', dst='candles')
-candles_4h = TaskDefinition('trades', name='candles_4h', every='4h',
-                            offset='5s', dst='candles')
-candles_1d = TaskDefinition('trades', name='candles_1d', every='1d',
-                            offset='5s', dst='candles')
 
 
 def main():
@@ -190,30 +178,6 @@ def create_all(_influx, org_id,
                           org_id=org_id,
                           org=org)
     candles_1m.create()
-    candles_5m.initialize(tasks_api, id='candles_5m',
-                          org_id=org_id,
-                          org=org)
-    candles_5m.create()
-    candles_15m.initialize(tasks_api, id='candles_15m',
-                           org_id=org_id,
-                           org=org)
-    candles_15m.create()
-    candles_1h.initialize(tasks_api, id='candles_1h',
-                          org_id=org_id,
-                          org=org)
-    candles_1h.create()
-    candles_4h.initialize(tasks_api, id='candles_4h',
-                          org_id=org_id,
-                          org=org)
-    candles_4h.create()
-    candles_6h.initialize(tasks_api, id='candles_6h',
-                          org_id=org_id,
-                          org=org)
-    candles_6h.create()
-    candles_1d.initialize(tasks_api, id='candles_1d',
-                          org_id=org_id,
-                          org=org)
-    candles_1d.create()
 
 
 if __name__ == '__main__':

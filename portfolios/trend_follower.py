@@ -12,7 +12,7 @@ from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import AuthenticatedClient
 from indicators import Ticker, TrailingVolume, TrendAcceleration, \
-    TrendStability, Momentum
+    TrendStability, Momentum, BidAsk
 from indicators.fib_trader import FibTrader
 from indicators.sliding_candles import CandleSticks
 from settings import influx_db as influx_db_settings, \
@@ -99,15 +99,17 @@ def main() -> None:
     candles_src = CandleSticks(client, portfolio_settings.EXCHANGE,
                                candle_periods,
                                timedelta(minutes=1))
+    bid_ask = BidAsk(client, period=timedelta(minutes=1))
     manager = PortfolioManager(coinbase, candles_src,
                                buy_indicator=buy_indicator,
                                sell_indicator=sell_indicator,
                                price_indicator=price_indicator,
                                volume_indicator=volume_indicator,
-                               cool_down=cool_down, liquidate_on_shutdown=True,
+                               bid_ask_indicator=bid_ask, cool_down=cool_down,
                                market_blacklist={'USDT-USD', 'DAI-USD'},
-                               stop_loss=stop_loss, sell_order_type='market',
-                               buy_order_type='market')
+                               stop_loss=stop_loss, liquidate_on_shutdown=True,
+                               buy_order_type='market',
+                               sell_order_type='market')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()

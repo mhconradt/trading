@@ -1,7 +1,11 @@
+import logging
+import time
 from datetime import timedelta
 
 import pandas as pd
 from influxdb_client import InfluxDBClient
+
+logger = logging.getLogger(__name__)
 
 
 class TrailingVolume:
@@ -39,6 +43,7 @@ class SplitQuoteVolume:
         self.frequency = frequency
 
     def compute(self) -> pd.DataFrame:
+        _start = time.time()
         query_api = self.db.query_api()
         query = """
             from(bucket: "trades")
@@ -47,13 +52,10 @@ class SplitQuoteVolume:
               |> filter(fn: (r) => r["side"] == side)
               |> filter(fn: (r) => r["_field"] == "price" or r["_field"] == "size")
               |> pivot(columnKey: ["_field"],
-                       rowKey: ["_time", "market", "side"], 
+                       rowKey: ["_time", "market"], 
                        valueColumn: "_value")
               |> map(fn: (r) => ({r with _value: r["price"] * r["size"]}))
               |> sum()
-              |> pivot(columnKey: ["side"], 
-                       rowKey: ["market"], 
-                       valueColumn: "_value")
               |> yield(name: "mean")
         """
         params = {'start': -1 * self.periods * self.frequency,
@@ -62,7 +64,8 @@ class SplitQuoteVolume:
                                             data_frame_index=['market'])
         if isinstance(raw_df, list):
             raw_df = pd.concat(raw_df)
-        return raw_df[['market', '_value']].set_index('market')
+        logger.debug(f"Query took {time.time() - _start:.2f}s")
+        return raw_df['_value']
 
 
 def main():

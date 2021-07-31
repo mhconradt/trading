@@ -10,4 +10,4 @@ COPY .. .
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python3", "-m", "portfolios.trend_follower"]
+CMD ["python3", "-m", "portfolios.mean_reversion"]

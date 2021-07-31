@@ -1,3 +1,4 @@
+import logging
 import typing as t
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -5,6 +6,8 @@ from datetime import datetime
 from cbpro import AuthenticatedClient
 
 from helper.coinbase import get_server_time
+
+logger = logging.getLogger(__name__)
 
 
 class OrderTracker(ABC):
@@ -36,6 +39,7 @@ class SyncCoinbaseOrderTracker(OrderTracker):
         return len(self.watchlist)
 
     def remember(self, order_id: str) -> None:
+        logger.debug(f"Tracking {order_id}")
         self.watchlist.append(order_id)
 
     def barrier_snapshot(self) -> t.Tuple[datetime, dict]:
@@ -44,7 +48,7 @@ class SyncCoinbaseOrderTracker(OrderTracker):
 
     def snapshot(self) -> dict:
         snapshot = {}
-        for order_id in self.watchlist:
+        for order_id in self.watchlist.copy():
             order = self.client.get_order(order_id)
             if order.get('message') == 'NotFound':
                 self.forget(order_id)
@@ -54,6 +58,7 @@ class SyncCoinbaseOrderTracker(OrderTracker):
 
     def forget(self, order_id: str) -> None:
         if order_id in self.watchlist:
+            logger.debug(f"Forgetting {order_id}")
             self.watchlist.remove(order_id)
 
 

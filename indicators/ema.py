@@ -1,7 +1,11 @@
+import logging
+import time
 from datetime import timedelta
 
 import pandas as pd
 from influxdb_client import InfluxDBClient
+
+logger = logging.getLogger(__name__)
 
 
 class TripleEMA:
@@ -11,6 +15,7 @@ class TripleEMA:
         self.frequency = frequency
 
     def compute(self) -> pd.Series:
+        _start = time.time()
         query = """
             measurement = "candles_" + string(v: frequency)
         
@@ -34,6 +39,7 @@ class TripleEMA:
         if isinstance(raw_df, list):
             raw_df = pd.concat(raw_df)
         df = raw_df['_value'].unstack('market')
+        logger.debug(f"Query took {time.time() - _start:.2f}s")
         return df.iloc[-1]  # convert to series
 
 

@@ -14,22 +14,6 @@ from realtime_ingest.sink import RecordSink, InfluxDBTradeSink, \
 from realtime_ingest.tasks import replay, create_all
 from realtime_ingest.watermarks import watermarks_at_time
 from settings import influx_db as influx_db_settings
-import sys
-import time
-import typing as t
-from datetime import timedelta
-
-import cbpro
-from influxdb_client import InfluxDBClient
-from influxdb_client.client.write_api import SYNCHRONOUS
-
-from helper.coinbase import get_usd_product_ids, get_server_time, \
-    PublicClient
-from realtime_ingest.sink import RecordSink, InfluxDBTradeSink, \
-    InfluxDBTickerSink, BatchingSink
-from realtime_ingest.tasks import replay, create_all
-from realtime_ingest.watermarks import watermarks_at_time
-from settings import influx_db as influx_db_settings
 
 EXCHANGE_NAME = 'coinbasepro'
 
@@ -38,7 +22,7 @@ def initialize_watermarks(influx_client: InfluxDBClient,
                           bucket: str,
                           products: t.List[str]) -> dict:
     query_api = influx_client.query_api()
-    window = timedelta(minutes=15)
+    window = timedelta(minutes=180)
     result = query_api.query_data_frame("""
         from(bucket: bucket)
             |> range(start: window_start)
@@ -102,7 +86,8 @@ class RouterClient(cbpro.WebsocketClient):
         for handler in self.subscriptions[msg['type']]:
             try:  # process message
                 handler.on_message(msg)
-            except (Exception,):
+            except (Exception,) as e:
+                print(e)
                 self.stop = True
 
 
@@ -111,7 +96,8 @@ class TickerHandler(MessageHandler):
         self.sink = sink
 
     def on_message(self, msg: dict) -> None:
-        self.sink.send(msg)
+        if 'time' in msg:
+            self.sink.send(msg)
 
 
 class TradesMessageHandler(MessageHandler):
@@ -184,19 +170,19 @@ def main() -> None:
                                      writer,
                                      org_id=influx_db_settings.INFLUX_ORG_ID,
                                      org=influx_db_settings.INFLUX_ORG,
-                                     bucket="trades")
+                                     bucket="tickers")
     while True:
         trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 1),
                                              watermarks)
         ticker_handler = TickerHandler(ticker_sink)
         trade_client = RouterClient({trade_handler: ['match', 'last_match'],
                                      ticker_handler: ['ticker']},
-                                    channels=['matches'],
+                                    channels=['matches', 'ticker'],
                                     products=products)
         try:
             trade_client.start()
             while not trade_client.stop:
-                time.sleep(5)
+                time.sleep(1)
         except KeyboardInterrupt:
             break
         finally:

@@ -150,7 +150,7 @@ module "k8s-cluster" {
   version = "17.1.0"
 
   cluster_name = format("%s-cluster", local.env_name)
-  cluster_version = "1.19"
+  cluster_version = "1.20"
   subnets = slice(aws_subnet.public[*].id, 0, 3)
   vpc_id = aws_vpc.vpc.id
 
@@ -165,7 +165,7 @@ module "k8s-cluster" {
   worker_groups = [
     {
       name = "default"
-      instance_type = "m5.large"
+      instance_type = "m5.xlarge"
       placement_tenancy = "default"
       volume_type = "gp2"
       subnets = slice(aws_subnet.public[*].id, 0, 3)

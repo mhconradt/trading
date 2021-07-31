@@ -1,4 +1,5 @@
 import itertools as it
+import itertools as it
 import logging
 import random
 import time
@@ -15,8 +16,7 @@ from pandas import DataFrame, Series
 from brain.order_tracker import SyncCoinbaseOrderTracker
 from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             DesiredLimitSell, PendingLimitSell, Sold,
-                            PendingCancelBuy,
-                            PendingCancelLimitSell, DesiredMarketSell,
+                            DesiredMarketSell,
                             PendingMarketSell,
                             PendingMarketBuy, DesiredMarketBuy,
                             Download, RootState)
@@ -24,7 +24,8 @@ from brain.position_counter import PositionCounter
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import get_server_time, AuthenticatedClient
-from indicators.protocols import InstantIndicator
+from indicators.protocols import InstantIndicator, BidAskIndicator, \
+    CandlesIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,10 @@ def apply_limit_size_limit(n: float, weights: pd.Series, prices: pd.Series,
         these_amounts = these_weights * n
         these_sizes = these_amounts / prices
         these_sizes, min_sizes = overlapping_labels(these_sizes, min_sizes)
-        above_limit = these_amounts[these_sizes > min_sizes]
+        large_enough = these_sizes > min_sizes
+        these_amounts, large_enough = overlapping_labels(these_amounts,
+                                                         large_enough)
+        above_limit = these_amounts[large_enough]
         if len(above_limit) > max_above_limit:
             max_above_limit = len(above_limit)
             best_weights = above_limit / above_limit.sum() * total_weight
@@ -123,28 +127,33 @@ def convert_rate(from_rate: float, from_t: timedelta,
 
 
 class PortfolioManager:
-    def __init__(self, client: AuthenticatedClient, candles_src,
+    def __init__(self, client: AuthenticatedClient,
+                 candles_src: CandlesIndicator,
                  buy_indicator: InstantIndicator,
                  sell_indicator: InstantIndicator,
                  price_indicator: InstantIndicator,
                  volume_indicator: InstantIndicator,
-                 cool_down: VolatilityCoolDown, liquidate_on_shutdown: bool,
+                 bid_ask_indicator: BidAskIndicator,
+                 cool_down: VolatilityCoolDown,
                  market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
-                 sell_order_type: str = 'limit',
-                 sell_time_in_force: str = 'GTC',
-                 buy_order_type: str = 'limit',
-                 buy_time_in_force: str = 'GTC',
+                 liquidate_on_shutdown: bool, sell_time_in_force: str = 'GTC',
+                 buy_order_type: str = 'limit', buy_time_in_force: str = 'GTC',
                  buy_half_life=timedelta(seconds=120),
-                 sell_half_life=timedelta(seconds=10)):
+                 sell_half_life=timedelta(seconds=10),
+                 sell_order_type: str = 'limit', post_only: bool = False,
+                 buy_age_limit=timedelta(minutes=1),
+                 sell_age_limit=timedelta(minutes=1)):
         self.buy_half_life = buy_half_life
         self.sell_half_life = sell_half_life
         self.initialized = False
+        self.post_only = post_only
         self.client = client
         self.candles_src = candles_src
         self.price_indicator = price_indicator
         self.volume_indicator = volume_indicator
         self.buy_indicator = buy_indicator
         self.sell_indicator = sell_indicator
+        self.bid_ask_indicator = bid_ask_indicator
         accounts = self.client.get_accounts()
         self.usd_account_id = [account['id'] for account in accounts if
                                account['currency'] == 'USD'][0]
@@ -161,8 +170,8 @@ class PortfolioManager:
 
         self.counter = PositionCounter()
 
-        self.buy_age_limit = timedelta(minutes=1)
-        self.sell_age_limit = timedelta(minutes=5)
+        self.buy_age_limit = buy_age_limit
+        self.sell_age_limit = sell_age_limit
 
         # TICK VARIABLES
         self.tick_time: t.Optional[datetime] = None
@@ -187,6 +196,8 @@ class PortfolioManager:
 
         # all of these can be computed from candlesticks
         self.prices: t.Optional[Series] = None
+        self.bids: t.Optional[Series] = None
+        self.asks: t.Optional[Series] = None
         self.volume: t.Optional[Series] = None
         self.buy_weights: t.Optional[Series] = None
         self.sell_fractions: t.Optional[Series] = None
@@ -200,13 +211,11 @@ class PortfolioManager:
         self.desired_market_buys: t.List[DesiredMarketBuy] = []
         self.pending_limit_buys: t.List[PendingLimitBuy] = []
         self.pending_market_buys: t.List[PendingMarketBuy] = []
-        self.pending_cancel_buys: t.List[PendingCancelBuy] = []
         self.active_positions: t.List[ActivePosition] = []
         self.desired_limit_sells: t.List[DesiredLimitSell] = []
         self.desired_market_sells: t.List[DesiredMarketSell] = []
         self.pending_limit_sells: t.List[PendingLimitSell] = []
         self.pending_market_sells: t.List[PendingMarketSell] = []
-        self.pending_cancel_sells: t.List[PendingCancelLimitSell] = []
         self.sells: t.List[Sold] = []
 
         self.cool_down = cool_down
@@ -227,13 +236,13 @@ class PortfolioManager:
         positions = it.chain(self.desired_limit_buys, self.pending_limit_buys,
                              self.desired_market_buys,
                              self.pending_market_buys,
-                             self.pending_cancel_buys, self.active_positions,
+                             self.active_positions,
                              self.desired_limit_sells,
                              self.desired_market_sells)
         for position in positions:
             if isinstance(position, (PendingMarketBuy, DesiredMarketBuy)):
                 sizes[position.market] += position.funds
-            else:
+            elif position.market in self.prices:
                 price = self.prices[position.market]
                 sizes[position.market] += position.size * price
         return Series({market: sizes[market] for market in self.market_info})
@@ -248,7 +257,7 @@ class PortfolioManager:
         min_limit = Decimal('0')
         # if a position price goes up then remaining could be negative
         spending_limits = remaining.where(remaining >= min_limit, min_limit)
-        return spending_limits.map(Decimal)
+        return spending_limits.fillna(Decimal('0')).map(Decimal)
 
     def calculate_size_limits(self) -> pd.Series:
         """
@@ -258,7 +267,7 @@ class PortfolioManager:
         aum_size_limit = self.calculate_aum_size_limit()
         pov_size_limits = self.calculate_volume_size_limits()
         mv_limits = DataFrame({'aum': aum_size_limit, 'pov': pov_size_limits})
-        return np.min(mv_limits, axis=1).map(Decimal)
+        return np.min(mv_limits, axis=1).fillna(0.).map(Decimal)
 
     def calculate_volume_size_limits(self) -> pd.Series:
         """
@@ -311,9 +320,9 @@ class PortfolioManager:
                 {product: float(info['base_min_size'])
                  for product, info in self.market_info.items()})
             weights = apply_limit_size_limit(n, weights,
-                                             self.prices.map(float),
+                                             self.bids.map(float),
                                              base_min_sizes)
-        return weights.map(Decimal)
+        return weights.fillna(0.).map(Decimal)
 
     def limit_weights(self, target_weights: Series,
                       spending_limit: Decimal) -> Series:
@@ -355,15 +364,15 @@ class PortfolioManager:
         budget = self.portfolio_available_funds * self.buy_increment
         spending_limit = budget / (Decimal('1') + self.taker_fee)
         weights = self.limit_weights(self.buy_weights, spending_limit)
-        decimal_weights = weights.map(Decimal)
+        decimal_weights = weights.fillna(0.).map(Decimal)
         for market, weight in decimal_weights.iteritems():
             assert isinstance(market, str)
             self.counter.increment()
             previous_state = RootState(market=market,
                                        number=self.counter.monotonic_count)
             state_change = f'buy target {weight:.2f}'
-            if self.buy_order_type == 'limit' and market in self.prices:
-                price = self.prices[market]
+            if self.buy_order_type == 'limit' and market in self.bids:
+                price = self.bids[market]
                 size = weight * spending_limit / price
                 buy = DesiredLimitBuy(price=price,
                                       size=size,
@@ -445,7 +454,7 @@ class PortfolioManager:
                 self.counter.decrement()
                 continue
                 # could probably use post_only in the order flags
-            elif info['cancel_only'] or info['post_only']:
+            elif info['cancel_only']:
                 self.counter.decrement()
                 continue
             price = buy.price.quantize(Decimal(info['quote_increment']),
@@ -458,11 +467,13 @@ class PortfolioManager:
                 continue
             max_size = Decimal(info['base_max_size'])
             size = min(size, max_size)
-            tif = self.buy_time_in_force
+            post_only = self.post_only or info['post_only']
+            tif = 'GTC' if post_only else self.buy_time_in_force
             order = self.client.retryable_limit_order(market, side='buy',
                                                       price=str(price),
                                                       size=str(size),
                                                       time_in_force=tif,
+                                                      post_only=post_only,
                                                       stp='cn')
             self.cool_down.bought(market)
             if 'id' not in order:
@@ -493,6 +504,7 @@ class PortfolioManager:
         for pending_buy in self.pending_limit_buys:
             market_info = self.market_info[pending_buy.market]
             if market_info['trading_disabled']:
+                logger.info(f"Trading disabled: {pending_buy}")
                 next_generation.append(pending_buy)
                 continue
             order_id = pending_buy.order_id
@@ -515,34 +527,27 @@ class PortfolioManager:
                 time_limit_expired = server_age > self.buy_age_limit
                 if time_limit_expired:
                     self.client.cancel_order(order_id)
-                    cancel_buy = PendingCancelBuy(
-                        market=pending_buy.market,
-                        price=pending_buy.price,
-                        size=pending_buy.size,
-                        order_id=order_id,
-                        created_at=pending_buy.created_at,
-                        previous_state=pending_buy,
-                        state_change=f'age limit {self.buy_age_limit} expired'
-                    )
-                    logger.debug(cancel_buy)
-                    self.pending_cancel_buys.append(cancel_buy)
-                else:
-                    next_generation.append(pending_buy)
+                next_generation.append(pending_buy)
+                continue
             elif status == 'done':
                 self.tracker.forget(order_id)
                 size = Decimal(order['filled_size'])
-                price = Decimal(order['executed_value']) / size
-                fee = Decimal(order['fill_fees'])
-                # place stop loss order
-                # place take profit order
-                # accounting for orders
-                active_position = ActivePosition(price, size, fee,
-                                                 market=pending_buy.market,
-                                                 start=self.tick_time,
-                                                 previous_state=pending_buy,
-                                                 state_change='order filled')
-                logger.debug(active_position)
-                self.active_positions.append(active_position)
+                if size:
+                    price = Decimal(order['executed_value']) / size
+                    fee = Decimal(order['fill_fees'])
+                    # place stop loss order
+                    # place take profit order
+                    # accounting for orders
+                    position = ActivePosition(price, size, fee,
+                                              market=pending_buy.market,
+                                              start=self.tick_time,
+                                              previous_state=pending_buy,
+                                              state_change='order filled')
+                    logger.debug(position)
+                    self.active_positions.append(position)
+                else:
+                    self.counter.decrement()
+                continue
             else:
                 logger.warning(f"Unknown status {status}.")
                 logger.debug(order)
@@ -610,6 +615,7 @@ class PortfolioManager:
         accumulators: t.Dict[str, ActivePosition] = {}
         for position in self.active_positions:
             if position.market in accumulators:
+                self.counter.decrement()
                 accumulator = accumulators[position.market]
                 both = accumulator.merge(position)
                 logger.debug(f"merge: {position} + {accumulator} = {both}")
@@ -636,25 +642,28 @@ class PortfolioManager:
                 continue
             increment = Decimal(market_info['base_increment'])
             sell_fraction = self.sell_fractions[market] * self.sell_increment
-            sell_size = compute_sell_size(position.size,
-                                          sell_fraction,
-                                          min_size,
-                                          increment)
+            incremental_sell_size = compute_sell_size(position.size,
+                                                      sell_fraction,
+                                                      min_size,
+                                                      increment)
+            liquidate = self.stop_loss.trigger_stop_loss(self.prices[market],
+                                                         position.price)
+            sell_size = position.size if liquidate else incremental_sell_size
             remainder = position.size - sell_size
             if sell_size:
                 if remainder:
                     self.counter.increment()
                 sell_fraction = sell_size / position.size
                 state_change = f'sell {sell_fraction:.3f}'
-                if self.sell_order_type == 'limit' and market in self.prices:
+                if self.sell_order_type == 'limit' and market in self.asks:
                     sell = DesiredLimitSell(size=sell_size,
-                                            price=self.prices.loc[market],
+                                            price=self.asks.loc[market],
                                             market=market,
                                             previous_state=position,
                                             state_change=state_change)
                     logger.debug(sell)
                     self.desired_limit_sells.append(sell)
-                elif self.sell_order_type == 'market':
+                else:
                     sell = DesiredMarketSell(size=sell_size,
                                              market=market,
                                              previous_state=position,
@@ -686,10 +695,10 @@ class PortfolioManager:
                 continue
             elif info['post_only'] or info['limit_only']:
                 transition = 'post only' if info['post_only'] else 'limit only'
-                if sell.market not in self.prices:
+                if sell.market not in self.asks:
                     next_generation.append(sell)  # neanderthal retry
                     continue
-                limit_sell = DesiredLimitSell(price=self.prices[sell.market],
+                limit_sell = DesiredLimitSell(price=self.asks[sell.market],
                                               size=sell.size,
                                               market=sell.market,
                                               previous_state=sell,
@@ -787,19 +796,22 @@ class PortfolioManager:
                 next_generation.append(sell)
                 continue
             quote_increment = Decimal(market_info['quote_increment'])
-            price = sell.price.quantize(quote_increment, rounding='ROUND_DOWN')
-            post_only = market_info['post_only']
+            price = sell.price.quantize(quote_increment)
+            post_only = market_info['post_only'] or self.post_only
             tif = 'GTC' if post_only else self.sell_time_in_force
             kwargs = dict(product_id=sell.market,
                           side='sell',
                           price=str(price),
                           size=str(sell.size),
                           time_in_force=tif,
+                          post_only=post_only,
                           stp='co')
-            if post_only:
-                kwargs['post_only'] = post_only
             order = self.client.retryable_limit_order(**kwargs)
             if 'id' not in order:
+                # this means the market moved up
+                if order.get('message') == 'Post only mode':
+                    sell.price = self.asks[sell.market]
+                    next_generation.append(sell)
                 logger.debug(f"Error placing order {order} {sell}")
                 continue
             order_id = order['id']
@@ -830,7 +842,7 @@ class PortfolioManager:
                 # created during this generation, nothing to see here
                 next_generation.append(sell)
                 continue
-            elif order_id not in self.orders:
+            if order_id not in self.orders:
                 self.tracker.forget(order_id)
                 # External cancellation of pending order
                 desired_sell = DesiredMarketSell(market=sell.market,
@@ -845,22 +857,10 @@ class PortfolioManager:
             if status in {'active', 'pending', 'open'}:
                 server_age = self.tick_time - sell.created_at
                 time_limit_expired = server_age > self.sell_age_limit
-                if time_limit_expired and not trading_disabled:
+                if time_limit_expired:
                     self.client.cancel_order(order_id)
-                    cancellation = PendingCancelLimitSell(
-                        market=sell.market,
-                        price=sell.price,
-                        size=sell.size,
-                        order_id=order_id,
-                        created_at=sell.created_at,
-                        previous_state=sell,
-                        state_change=f'age limit {self.sell_age_limit} expired'
-                    )
-                    logger.debug(cancellation)
-                    self.pending_cancel_sells.append(cancellation)
-                else:
-                    next_generation.append(sell)
-                    continue
+                next_generation.append(sell)
+                continue
             elif status == 'done':
                 self.tracker.forget(order_id)
                 # external cancellation without being filled
@@ -895,79 +895,6 @@ class PortfolioManager:
                 continue
         self.pending_limit_sells = next_generation
 
-    def check_cancel_buys(self) -> None:
-        next_generation: t.List[PendingCancelBuy] = []
-        for cancellation in self.pending_cancel_buys:
-            order_id = cancellation.order_id
-            if order_id not in self.orders:
-                self.tracker.forget(order_id)
-                self.counter.decrement()
-                continue
-            order = self.orders[order_id]
-            status = order['status']
-            if status == {'active', 'pending', 'open'}:
-                next_generation.append(cancellation)
-                continue
-            elif status == 'done':
-                self.tracker.forget(order_id)
-                executed_value = Decimal(order['executed_value'])
-                filled_size = Decimal(order['filled_size'])
-                fully_filled = filled_size == cancellation.size
-                state_change = 'filled' if fully_filled else 'partial fill'
-                executed_price = executed_value / filled_size
-                position = ActivePosition(market=cancellation.market,
-                                          price=executed_price,
-                                          size=filled_size,
-                                          fees=Decimal(order['fill_fees']),
-                                          start=self.tick_time,
-                                          previous_state=cancellation,
-                                          state_change=state_change)
-                logger.debug(position)
-                self.active_positions.append(position)
-            else:
-                logger.debug(order)
-                logger.debug(f"Unknown status {status}")
-                next_generation.append(cancellation)
-                continue
-        self.pending_cancel_buys = next_generation
-
-    def check_cancel_sells(self) -> None:
-        next_generation: t.List[PendingCancelLimitSell] = []
-        for cancellation in self.pending_cancel_sells:
-            order_id = cancellation.order_id
-            order = self.orders.get(order_id, None)
-            if order is None or order['status'] == 'done':
-                self.tracker.forget(order_id)
-                e_v = Decimal(order['executed_value'] if order else '0')
-                filled_size = Decimal(order['filled_size'] if order else '0')
-                remainder = cancellation.size - filled_size
-                if remainder:
-                    self.counter.increment()
-                    transition = 'partial fill' if filled_size else 'unfilled'
-                    sell = DesiredMarketSell(
-                        size=remainder, market=cancellation.market,
-                        previous_state=cancellation,
-                        state_change=transition)
-                    logger.debug(sell)
-                    self.desired_market_sells.append(sell)
-                if order is None or not filled_size:
-                    self.counter.decrement()
-                    continue
-                executed_price = e_v / filled_size
-                filled = filled_size == cancellation.size
-                transition = 'filled' if filled else 'partial fill'
-                sell = Sold(price=executed_price, size=filled_size,
-                            fees=Decimal(order['fill_fees']),
-                            market=cancellation.market,
-                            previous_state=cancellation,
-                            state_change=transition)
-                logger.debug(sell)
-                self.sells.append(sell)
-            elif order['status'] in {'active', 'pending', 'open'}:
-                next_generation.append(cancellation)
-                continue
-        self.pending_cancel_sells = next_generation
-
     def check_sold(self) -> None:
         """
         Record final information about each position.
@@ -986,10 +913,14 @@ class PortfolioManager:
     def set_tick_variables(self) -> None:
         self.set_portfolio_available_funds()
         candles = self.candles_src.compute()
-        self.prices = self.price_indicator.compute(candles).map(Decimal)
-        self.volume = self.volume_indicator.compute(candles).map(Decimal)
-        self.buy_weights = self.buy_indicator.compute(candles).map(Decimal)
-        self.sell_fractions = self.sell_indicator.compute(candles).map(Decimal)
+        volume = self.volume_indicator.compute(candles)
+        self.volume = volume.fillna(0.).map(Decimal)
+        prices = self.price_indicator.compute(candles)
+        self.prices = prices.map(Decimal).where(prices.notna(), pd.NA)
+        buys = self.buy_indicator.compute(candles)
+        self.buy_weights = buys.map(Decimal).where(buys.notna(), pd.NA)
+        sells = self.sell_indicator.compute(candles)
+        self.sell_fractions = sells.map(Decimal).where(sells.notna(), pd.NA)
         self.set_market_info()
         self.set_fee()
         tick_time, self.orders = self.tracker.barrier_snapshot()
@@ -998,7 +929,7 @@ class PortfolioManager:
         if last_tick_time:
             tick_duration = tick_time - last_tick_time
             buy_half_life = self.buy_half_life
-            buy_target = 1. - float(self.pop_limit)
+            buy_target = 0.5
             buy_increment = 1. - convert_rate(buy_target, buy_half_life,
                                               tick_duration)
             self.buy_increment = Decimal(buy_increment)
@@ -1006,6 +937,13 @@ class PortfolioManager:
             sell_increment = 1. - convert_rate(.5, sell_half_life,
                                                tick_duration)
             self.sell_increment = Decimal(sell_increment)
+        # these are down here so they're computed last
+        # use bid/ask in a buy/sell context and prices everywhere else
+        bid_ask = self.bid_ask_indicator.compute()
+        bids = bid_ask['bid']
+        self.bids = bids.map(Decimal).where(bids.notna(), pd.NA)
+        asks = bid_ask['ask']
+        self.asks = asks.map(Decimal).where(asks.notna(), pd.NA)
 
     def set_market_info(self) -> None:
         self.market_info = {product['id']: product for product in
@@ -1056,6 +994,8 @@ class PortfolioManager:
             balance = Decimal(account['balance'])
             if balance < Decimal(self.market_info[market]['base_min_size']):
                 continue
+            if market not in self.prices:
+                continue
             price = self.prices[market]
             self.counter.increment()
             tail = Download(self.counter.monotonic_count, market=market)
@@ -1085,22 +1025,20 @@ class PortfolioManager:
             logger.info(f"Tick took {time.time() - iteration_start:.1f}s")
 
     def manage_positions(self):
+        start = time.time()
         self.check_sold()
-        self.check_cancel_sells()
         self.check_pending_market_sells()
         self.check_pending_limit_sells()
-        self.check_desired_market_sells()
-        self.check_desired_limit_sells()
-        self.check_active_positions()
-        self.check_cancel_buys()
         self.check_pending_limit_buys()
         self.check_pending_market_buys()
+
+        self.queue_buys()
         self.check_desired_limit_buys()
         self.check_desired_market_buys()
-
-        # This implies there are no desired buys during queue_buys.
-        self.set_portfolio_available_funds()
-        self.queue_buys()
+        self.check_active_positions()
+        self.check_desired_market_sells()
+        self.check_desired_limit_sells()
+        logger.info(f"Position check took {time.time() - start:.2f}s")
 
 
 __all__ = ['PortfolioManager']

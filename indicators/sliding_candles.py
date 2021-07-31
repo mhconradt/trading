@@ -1,9 +1,13 @@
+import logging
+import time
 from datetime import timedelta
 
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
 from exceptions import StaleDataException
+
+logger = logging.getLogger(__name__)
 
 
 class CandleSticks:
@@ -16,6 +20,7 @@ class CandleSticks:
         self.offset = offset
 
     def compute(self) -> pd.DataFrame:
+        _start = time.time()
         query_api = self.db.query_api()
         start = -(self.periods + self.offset) * self.frequency
         stop = -self.offset * self.frequency
@@ -79,6 +84,7 @@ class CandleSticks:
         times = candles.index.levels[candles.index.names.index('_start')]
         if times.nunique() < self.periods:
             raise StaleDataException("Insufficient data.")
+        logger.debug(f"Query took {time.time() - _start:.2f}s")
         return candles
 
 

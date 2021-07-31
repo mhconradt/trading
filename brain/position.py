@@ -24,6 +24,15 @@ class PositionState(ABC):
         else:
             return repr(self)
 
+    def last_active_price(self) -> Decimal:
+        state = self
+        while state:
+            if isinstance(state, ActivePosition):
+                return state.price
+            else:
+                state = state.previous_state
+        raise ValueError("State has no last active position")
+
 
 @dataclass(repr=False)
 class RootState(PositionState):
