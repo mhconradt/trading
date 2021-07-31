@@ -61,7 +61,7 @@ class MeanReversionSell:
         prices = candles.close.unstack('market').iloc[-1]
         moving_averages = self.ema.compute()
         above = prices / moving_averages - 1. > self.threshold
-        return above.astype(np.float64)
+        return above.astype(np.float64) / 2.
 
 
 def main() -> None:
@@ -100,8 +100,8 @@ def main() -> None:
                                liquidate_on_shutdown=False,
                                buy_order_type='limit',
                                sell_order_type='limit',
-                               buy_half_life=timedelta(minutes=3),
-                               sell_half_life=timedelta(minutes=3),
+                               buy_horizon=timedelta(minutes=3),
+                               sell_horizon=timedelta(minutes=3),
                                post_only=True,
                                buy_age_limit=timedelta(seconds=15),
                                sell_age_limit=timedelta(seconds=30))

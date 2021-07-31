@@ -1,6 +1,6 @@
 import itertools as it
-import itertools as it
 import logging
+import math
 import random
 import time
 import typing as t
@@ -120,10 +120,8 @@ def compute_sell_size(size: Decimal, fraction: Decimal,
         return l1_sell_size
 
 
-def convert_rate(from_rate: float, from_t: timedelta,
-                 to_t: timedelta) -> float:
-    periods = from_t.total_seconds() / to_t.total_seconds()
-    return from_rate ** (1 / periods)
+def safely_decimalize(s: pd.Series) -> pd.Series:
+    return s.map(Decimal).where(s.notna(), pd.NA)
 
 
 class PortfolioManager:
@@ -138,13 +136,13 @@ class PortfolioManager:
                  market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
                  liquidate_on_shutdown: bool, sell_time_in_force: str = 'GTC',
                  buy_order_type: str = 'limit', buy_time_in_force: str = 'GTC',
-                 buy_half_life=timedelta(seconds=120),
-                 sell_half_life=timedelta(seconds=10),
+                 buy_horizon=timedelta(seconds=120),
+                 sell_horizon=timedelta(seconds=10),
                  sell_order_type: str = 'limit', post_only: bool = False,
                  buy_age_limit=timedelta(minutes=1),
                  sell_age_limit=timedelta(minutes=1)):
-        self.buy_half_life = buy_half_life
-        self.sell_half_life = sell_half_life
+        self.buy_horizon = buy_horizon
+        self.sell_horizon = sell_horizon
         self.initialized = False
         self.post_only = post_only
         self.client = client
@@ -162,8 +160,8 @@ class PortfolioManager:
         self.min_position_size = Decimal('0')
         self.max_positions = 256
 
-        self.sell_increment = Decimal('0.01')
-        self.buy_increment = Decimal('0.01')
+        self.buy_target_periods = 0
+        self.sell_target_periods = 0
 
         self.pop_limit = Decimal('0.25')
         self.pov_limit = Decimal('0.2')
@@ -200,7 +198,7 @@ class PortfolioManager:
         self.asks: t.Optional[Series] = None
         self.volume: t.Optional[Series] = None
         self.buy_weights: t.Optional[Series] = None
-        self.sell_fractions: t.Optional[Series] = None
+        self.sell_weights: t.Optional[Series] = None
 
         self.market_info: t.Optional[t.Dict[str, dict]] = None
         self.taker_fee: t.Optional[Decimal] = None
@@ -220,7 +218,6 @@ class PortfolioManager:
 
         self.cool_down = cool_down
         self.stop_loss = stop_loss
-        self.realized_gains = Decimal('0')
         self.blacklist = market_blacklist
 
         self.liquidate_on_shutdown = liquidate_on_shutdown
@@ -361,7 +358,7 @@ class PortfolioManager:
         Don't queue if would put market above market_percentage_limit.
         Don't queue if would violate volatility cooldown.
         """
-        budget = self.portfolio_available_funds * self.buy_increment
+        budget = self.portfolio_available_funds
         spending_limit = budget / (Decimal('1') + self.taker_fee)
         weights = self.limit_weights(self.buy_weights, spending_limit)
         decimal_weights = weights.fillna(0.).map(Decimal)
@@ -371,9 +368,10 @@ class PortfolioManager:
             previous_state = RootState(market=market,
                                        number=self.counter.monotonic_count)
             state_change = f'buy target {weight:.2f}'
+            funds = Decimal(weight) * spending_limit
             if self.buy_order_type == 'limit' and market in self.bids:
                 price = self.bids[market]
-                size = weight * spending_limit / price
+                size = funds / price
                 buy = DesiredLimitBuy(price=price,
                                       size=size,
                                       market=market,
@@ -382,7 +380,6 @@ class PortfolioManager:
                 logger.debug(buy)
                 self.desired_limit_buys.appendleft(buy)
             elif self.buy_order_type == 'market':
-                funds = weight * spending_limit
                 buy = DesiredMarketBuy(funds=funds, market=market,
                                        previous_state=previous_state,
                                        state_change=state_change)
@@ -641,7 +638,7 @@ class PortfolioManager:
                 next_generation.append(position)
                 continue
             increment = Decimal(market_info['base_increment'])
-            sell_fraction = self.sell_fractions[market] * self.sell_increment
+            sell_fraction = self.sell_weights[market]
             incremental_sell_size = compute_sell_size(position.size,
                                                       sell_fraction,
                                                       min_size,
@@ -837,7 +834,6 @@ class PortfolioManager:
         for sell in self.pending_limit_sells:
             order_id = sell.order_id
             market_info = self.market_info[sell.market]
-            trading_disabled = market_info['trading_disabled']
             if sell.created_at > self.tick_time:
                 # created during this generation, nothing to see here
                 next_generation.append(sell)
@@ -882,12 +878,14 @@ class PortfolioManager:
                     self.sells.append(sold)
                 if remainder:
                     self.counter.increment()
-                    desired_sell = DesiredMarketSell(market=sell.market,
-                                                     size=remainder,
-                                                     previous_state=sell,
-                                                     state_change='ext cancel')
+                    price = self.asks[sell.market]
+                    desired_sell = DesiredLimitSell(market=sell.market,
+                                                    size=remainder,
+                                                    price=price,
+                                                    previous_state=sell,
+                                                    state_change='ext cancel')
                     logger.debug(desired_sell)
-                    self.desired_market_sells.append(desired_sell)
+                    self.desired_limit_sells.append(desired_sell)
             else:
                 logger.warning(f"Unknown status: {status}")
                 logger.debug(order)
@@ -916,27 +914,36 @@ class PortfolioManager:
         volume = self.volume_indicator.compute(candles)
         self.volume = volume.fillna(0.).map(Decimal)
         prices = self.price_indicator.compute(candles)
-        self.prices = prices.map(Decimal).where(prices.notna(), pd.NA)
-        buys = self.buy_indicator.compute(candles)
-        self.buy_weights = buys.map(Decimal).where(buys.notna(), pd.NA)
-        sells = self.sell_indicator.compute(candles)
-        self.sell_fractions = sells.map(Decimal).where(sells.notna(), pd.NA)
+        self.prices = safely_decimalize(prices)
+        buy_targets = self.buy_indicator.compute(candles)
+        if self.buy_target_periods > 0:
+            buy_exp = 1 / self.buy_target_periods
+            buy_weights = 1 - (1 - buy_targets) ** buy_exp
+            self.buy_weights = safely_decimalize(buy_weights)
+        else:
+            buy_weight_values = np.zeros_like(buy_targets)
+            buy_weights = pd.Series(buy_weight_values, buy_targets.index)
+            self.buy_weights = buy_weights.map(Decimal)
+        sell_targets = self.sell_indicator.compute(candles)
+        if self.sell_target_periods > 0:
+            sell_exp = 1 / self.sell_target_periods
+            sell_weights = 1 - (1 - sell_targets) ** sell_exp
+            self.sell_weights = safely_decimalize(sell_weights)
+        else:
+            sell_weight_values = np.zeros_like(sell_targets)
+            sell_weights = pd.Series(sell_weight_values, sell_targets.index)
+            self.sell_weights = sell_weights.map(Decimal)
         self.set_market_info()
         self.set_fee()
         tick_time, self.orders = self.tracker.barrier_snapshot()
         last_tick_time = self.tick_time
         self.tick_time = tick_time
         if last_tick_time:
-            tick_duration = tick_time - last_tick_time
-            buy_half_life = self.buy_half_life
-            buy_target = 0.5
-            buy_increment = 1. - convert_rate(buy_target, buy_half_life,
-                                              tick_duration)
-            self.buy_increment = Decimal(buy_increment)
-            sell_half_life = self.sell_half_life
-            sell_increment = 1. - convert_rate(.5, sell_half_life,
-                                               tick_duration)
-            self.sell_increment = Decimal(sell_increment)
+            duration = (tick_time - last_tick_time).total_seconds()
+            buy_duration = self.buy_horizon.total_seconds()
+            self.buy_target_periods = math.floor(buy_duration / duration)
+            sell_duration = self.sell_horizon.total_seconds()
+            self.sell_target_periods = math.floor(sell_duration / duration)
         # these are down here so they're computed last
         # use bid/ask in a buy/sell context and prices everywhere else
         bid_ask = self.bid_ask_indicator.compute()
