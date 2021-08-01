@@ -3,7 +3,6 @@ import signal
 import sys
 from datetime import timedelta
 
-import numpy as np
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
@@ -28,10 +27,10 @@ logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
 class MeanReversionBuy:
     def __init__(self, db: InfluxDBClient, periods: int = 26,
                  frequency: timedelta = timedelta(minutes=1)):
-        self.threshold = 0.002
+        self.threshold = 0.001
         self.periods = periods
         self.ema = TripleEMA(db, periods, frequency)
-        self.split_quote_volume = SplitQuoteVolume(db, 5, frequency, 'buy')
+        self.split_quote_volume = SplitQuoteVolume(db, 1, frequency)
 
     @property
     def periods_required(self) -> int:
@@ -39,19 +38,25 @@ class MeanReversionBuy:
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         prices = candles.close.unstack('market').iloc[-1]
-        down_quote_volume = self.split_quote_volume.compute()
+        quote_volume = self.split_quote_volume.compute()
+        up_volume, down_volume = quote_volume['sell'], quote_volume['buy']
         moving_averages = self.ema.compute()
         below = 1 - (prices / moving_averages) > self.threshold
-        volume_fractions = down_quote_volume / down_quote_volume.sum()
-        return volume_fractions[below]
+        ape_index = down_volume / (down_volume + up_volume)
+        ape_volume = down_volume * ape_index
+        ape_fraction = ape_volume / ape_volume.sum()
+        matching = ape_fraction.index.intersection(below.index)
+        ape_fraction, below = ape_fraction[matching], below[matching]
+        return ape_fraction[below]
 
 
 class MeanReversionSell:
     def __init__(self, db: InfluxDBClient, periods: int = 26,
                  frequency: timedelta = timedelta(minutes=1)):
-        self.threshold = 0.002
+        self.threshold = 0.001
         self.periods = periods
         self.ema = TripleEMA(db, periods, frequency)
+        self.split_quote_volume = SplitQuoteVolume(db, 1, frequency)
 
     @property
     def periods_required(self) -> int:
@@ -59,9 +64,14 @@ class MeanReversionSell:
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         prices = candles.close.unstack('market').iloc[-1]
+        quote_volume = self.split_quote_volume.compute()
+        up_volume, down_volume = quote_volume['sell'], quote_volume['buy']
         moving_averages = self.ema.compute()
         above = prices / moving_averages - 1. > self.threshold
-        return above.astype(np.float64) / 2.
+        ape_index = up_volume / (up_volume + down_volume)
+        matching = ape_index.index.intersection(above.index)
+        ape_index, above = ape_index[matching], above[matching]
+        return ape_index[above]
 
 
 def main() -> None:
@@ -100,11 +110,11 @@ def main() -> None:
                                liquidate_on_shutdown=False,
                                buy_order_type='limit',
                                sell_order_type='limit',
-                               buy_horizon=timedelta(minutes=3),
-                               sell_horizon=timedelta(minutes=3),
+                               buy_horizon=timedelta(minutes=5),
+                               sell_horizon=timedelta(minutes=5),
                                post_only=True,
                                buy_age_limit=timedelta(seconds=15),
-                               sell_age_limit=timedelta(seconds=30))
+                               sell_age_limit=timedelta(seconds=15))
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()
