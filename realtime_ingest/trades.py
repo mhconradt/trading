@@ -49,6 +49,8 @@ def catchup(product: str, frm: int, to: int) -> t.Iterable[dict]:
     client = PublicClient()
     for trade in client.get_product_trades(product):
         trade_id = trade['trade_id']
+        if not (to - trade_id) % 1000:
+            time.sleep(0.1)  # TODO: Figure out rate limiting this endpoint
         if trade_id >= to:
             continue
         elif trade_id <= frm:

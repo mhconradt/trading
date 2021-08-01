@@ -638,7 +638,7 @@ class PortfolioManager:
                 next_generation.append(position)
                 continue
             increment = Decimal(market_info['base_increment'])
-            sell_fraction = self.sell_weights[market]
+            sell_fraction = self.sell_weights.get(market, Decimal(0))
             incremental_sell_size = compute_sell_size(position.size,
                                                       sell_fraction,
                                                       min_size,
