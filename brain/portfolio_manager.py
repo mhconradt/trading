@@ -1,6 +1,5 @@
 import itertools as it
 import logging
-import math
 import random
 import time
 import typing as t
@@ -124,6 +123,19 @@ def safely_decimalize(s: pd.Series) -> pd.Series:
     return s.map(Decimal).where(s.notna(), pd.NA)
 
 
+def adjust_spending_target(targets: pd.Series,
+                           over: pd.Series) -> pd.Series:
+    exp = 1 / over
+    weights = 1 - (1 - targets) ** exp
+    return weights.fillna(0.).map(Decimal)
+
+
+def calculate_ratios(cash: pd.Series,
+                     positions: pd.Series) -> pd.Series:
+    ratios = positions.replace(0., 1.) / cash.replace(0., 1.)
+    return ratios.fillna(1.)
+
+
 class PortfolioManager:
     def __init__(self, client: AuthenticatedClient,
                  candles_src: CandlesIndicator,
@@ -136,13 +148,11 @@ class PortfolioManager:
                  market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
                  liquidate_on_shutdown: bool, sell_time_in_force: str = 'GTC',
                  buy_order_type: str = 'limit', buy_time_in_force: str = 'GTC',
-                 buy_horizon=timedelta(seconds=120),
-                 sell_horizon=timedelta(seconds=10),
+                 target_horizon=timedelta(seconds=120),
                  sell_order_type: str = 'limit', post_only: bool = False,
                  buy_age_limit=timedelta(minutes=1),
                  sell_age_limit=timedelta(minutes=1)):
-        self.buy_horizon = buy_horizon
-        self.sell_horizon = sell_horizon
+        self.target_horizon = target_horizon
         self.initialized = False
         self.post_only = post_only
         self.client = client
@@ -159,9 +169,6 @@ class PortfolioManager:
         # avoid congesting system with dozens of tiny positions
         self.min_position_size = Decimal('0')
         self.max_positions = 256
-
-        self.buy_target_periods = 0
-        self.sell_target_periods = 0
 
         self.pop_limit = Decimal('0.25')
         self.pov_limit = Decimal('0.2')
@@ -224,11 +231,11 @@ class PortfolioManager:
         self.stop = False
 
     def calculate_aum(self) -> Decimal:
-        quote_sizes = self.calculate_market_quote_sizes()
+        quote_sizes = self.calculate_position_quote_sizes()
         total_size = np.sum(quote_sizes)
         return total_size + self.portfolio_available_funds
 
-    def calculate_market_quote_sizes(self) -> pd.Series:
+    def calculate_position_quote_sizes(self) -> pd.Series:
         sizes = defaultdict(lambda: Decimal('0'))
         positions = it.chain(self.desired_limit_buys, self.pending_limit_buys,
                              self.desired_market_buys,
@@ -249,7 +256,7 @@ class PortfolioManager:
         Calculate spending limits based on position limits.
         """
         size_limits = self.calculate_size_limits()
-        current_sizes = self.calculate_market_quote_sizes()
+        current_sizes = self.calculate_position_quote_sizes()
         remaining = size_limits - current_sizes
         min_limit = Decimal('0')
         # if a position price goes up then remaining could be negative
@@ -915,35 +922,32 @@ class PortfolioManager:
         self.volume = volume.fillna(0.).map(Decimal)
         prices = self.price_indicator.compute(candles)
         self.prices = safely_decimalize(prices)
-        buy_targets = self.buy_indicator.compute(candles)
-        if self.buy_target_periods > 0:
-            buy_exp = 1 / self.buy_target_periods
-            buy_weights = 1 - (1 - buy_targets) ** buy_exp
-            self.buy_weights = safely_decimalize(buy_weights)
-        else:
-            buy_weight_values = np.zeros_like(buy_targets)
-            buy_weights = pd.Series(buy_weight_values, buy_targets.index)
-            self.buy_weights = buy_weights.map(Decimal)
-        sell_targets = self.sell_indicator.compute(candles)
-        if self.sell_target_periods > 0:
-            sell_exp = 1 / self.sell_target_periods
-            sell_weights = 1 - (1 - sell_targets) ** sell_exp
-            self.sell_weights = safely_decimalize(sell_weights)
-        else:
-            sell_weight_values = np.zeros_like(sell_targets)
-            sell_weights = pd.Series(sell_weight_values, sell_targets.index)
-            self.sell_weights = sell_weights.map(Decimal)
-        self.set_market_info()
-        self.set_fee()
         tick_time, self.orders = self.tracker.barrier_snapshot()
         last_tick_time = self.tick_time
         self.tick_time = tick_time
+        self.set_market_info()
+        self.set_fee()
+        buy_targets = self.buy_indicator.compute(candles)
+        sell_targets = self.sell_indicator.compute(candles)
+        qv = candles.quote_volume.unstack('market').sum()
+        cash = self.calculate_cash_balances(qv)
+        holdings = self.calculate_position_quote_sizes().map(float)
+        ratios = calculate_ratios(cash, holdings)
+        horizon_total_seconds = self.target_horizon.total_seconds()
+        buy_horizons = np.sqrt(ratios) * horizon_total_seconds
+        sell_horizons = np.sqrt(1 / ratios) * horizon_total_seconds
         if last_tick_time:
-            duration = (tick_time - last_tick_time).total_seconds()
-            buy_duration = self.buy_horizon.total_seconds()
-            self.buy_target_periods = math.floor(buy_duration / duration)
-            sell_duration = self.sell_horizon.total_seconds()
-            self.sell_target_periods = math.floor(sell_duration / duration)
+            last_tick_duration = tick_time - last_tick_time
+            duration = last_tick_duration.total_seconds()
+            buy_target_periods = np.floor(buy_horizons / duration)
+            sell_target_periods = np.floor(sell_horizons / duration)
+        else:
+            buy_target_periods = pd.Series([], dtype=np.float64)
+            sell_target_periods = pd.Series([], dtype=np.float64)
+        self.buy_weights = adjust_spending_target(buy_targets,
+                                                  buy_target_periods)
+        self.sell_weights = adjust_spending_target(sell_targets,
+                                                   sell_target_periods)
         # these are down here so they're computed last
         # use bid/ask in a buy/sell context and prices everywhere else
         bid_ask = self.bid_ask_indicator.compute()
@@ -951,6 +955,12 @@ class PortfolioManager:
         self.bids = bids.map(Decimal).where(bids.notna(), pd.NA)
         asks = bid_ask['ask']
         self.asks = asks.map(Decimal).where(asks.notna(), pd.NA)
+
+    def calculate_cash_balances(self, qv: pd.Series) -> pd.Series:
+        qv_fractions = qv / qv.sum()
+        funds = float(self.portfolio_available_funds)
+        cash_balances = (qv_fractions * funds).fillna(0.)
+        return cash_balances
 
     def set_market_info(self) -> None:
         self.market_info = {product['id']: product for product in

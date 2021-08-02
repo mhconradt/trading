@@ -174,7 +174,7 @@ def main() -> None:
                                      org=influx_db_settings.INFLUX_ORG,
                                      bucket="tickers")
     while True:
-        trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 1),
+        trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 16),
                                              watermarks)
         ticker_handler = TickerHandler(ticker_sink)
         trade_client = RouterClient({trade_handler: ['match', 'last_match'],

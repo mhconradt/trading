@@ -69,20 +69,30 @@ def main():
     import time
 
     from settings import influx_db as influx_db_settings
+    from indicators.sliding_candles import CandleSticks
 
     influx_client = InfluxDBClient(influx_db_settings.INFLUX_URL,
                                    influx_db_settings.INFLUX_TOKEN,
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG)
-    quote_volume = SplitQuoteVolume(influx_client, 5, timedelta(minutes=1))
+    src = CandleSticks(influx_client, 'coinbasepro', 5,
+                       frequency=timedelta(minutes=1), offset=0)
+    qv = TrailingQuoteVolume(5)
+    splits = SplitQuoteVolume(influx_client, 5, timedelta(minutes=1))
     total = 0.
     while True:
         try:
+            candles = src.compute()
+            qv_values = qv.compute(candles)
+            percentages = qv_values / qv_values.sum()
+            print(percentages.sort_values(ascending=False).head(10))
+            print(percentages.sort_values().head(10))
             start = time.time()
-            values = quote_volume.compute()
-            print(values)
+            # values = splits.compute()
+            # print(values)
             total += time.time() - start
-        except (Exception,):
+        except (Exception,) as e:
+            print(e)
             pass
 
 

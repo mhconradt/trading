@@ -109,10 +109,8 @@ def main() -> None:
                                stop_loss=stop_loss,
                                liquidate_on_shutdown=False,
                                buy_order_type='limit',
-                               sell_order_type='limit',
-                               buy_horizon=timedelta(minutes=5),
-                               sell_horizon=timedelta(minutes=5),
-                               post_only=True,
+                               target_horizon=timedelta(minutes=5),
+                               sell_order_type='limit', post_only=True,
                                buy_age_limit=timedelta(seconds=15),
                                sell_age_limit=timedelta(seconds=15))
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
