@@ -151,7 +151,8 @@ class PortfolioManager:
                  target_horizon=timedelta(seconds=120),
                  sell_order_type: str = 'limit', post_only: bool = False,
                  buy_age_limit=timedelta(minutes=1),
-                 sell_age_limit=timedelta(minutes=1)):
+                 sell_age_limit=timedelta(minutes=1), index: bool = False):
+        self.index = index
         self.target_horizon = target_horizon
         self.initialized = False
         self.post_only = post_only
@@ -929,18 +930,23 @@ class PortfolioManager:
         self.set_fee()
         buy_targets = self.buy_indicator.compute(candles)
         sell_targets = self.sell_indicator.compute(candles)
-        qv = candles.quote_volume.unstack('market').sum()
-        cash = self.calculate_cash_balances(qv)
-        holdings = self.calculate_position_quote_sizes().map(float)
-        ratios = calculate_ratios(cash, holdings)
-        horizon_total_seconds = self.target_horizon.total_seconds()
-        buy_horizons = np.sqrt(ratios) * horizon_total_seconds
-        sell_horizons = np.sqrt(1 / ratios) * horizon_total_seconds
+        if self.index:
+            qv = candles.quote_volume.unstack('market').sum()
+            cash = self.calculate_cash_balances(qv)
+            holdings = self.calculate_position_quote_sizes().map(float)
+            ratio = calculate_ratios(cash, holdings)
+        else:
+            holdings = self.calculate_position_quote_sizes().sum()
+            funds = self.portfolio_available_funds
+            ratio = float(holdings / funds)
         if last_tick_time:
+            horizon_total_seconds = self.target_horizon.total_seconds()
+            buy_horizon = np.sqrt(ratio) * horizon_total_seconds
+            sell_horizon = np.sqrt(1 / ratio) * horizon_total_seconds
             last_tick_duration = tick_time - last_tick_time
             duration = last_tick_duration.total_seconds()
-            buy_target_periods = np.floor(buy_horizons / duration)
-            sell_target_periods = np.floor(sell_horizons / duration)
+            buy_target_periods = np.floor(buy_horizon / duration)
+            sell_target_periods = np.floor(sell_horizon / duration)
         else:
             buy_target_periods = pd.Series([], dtype=np.float64)
             sell_target_periods = pd.Series([], dtype=np.float64)

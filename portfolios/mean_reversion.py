@@ -99,6 +99,9 @@ def main() -> None:
     candles_src = CandleSticks(client, portfolio_settings.EXCHANGE,
                                candle_periods,
                                FREQUENCY, offset=0)
+    # potentially too long specific pairs
+    # is it momentum trading?
+    # perhaps use position sizes / available funds
     manager = PortfolioManager(coinbase, candles_src,
                                buy_indicator=buy_indicator,
                                sell_indicator=sell_indicator,
