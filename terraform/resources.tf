@@ -165,7 +165,7 @@ module "k8s-cluster" {
   worker_groups = [
     {
       name = "default"
-      instance_type = "m5.xlarge"
+      instance_type = "m5.large"
       placement_tenancy = "default"
       volume_type = "gp2"
       subnets = slice(aws_subnet.public[*].id, 0, 3)

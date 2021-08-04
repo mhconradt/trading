@@ -3,6 +3,7 @@ import signal
 import sys
 from datetime import timedelta
 
+import numpy as np
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
@@ -67,11 +68,16 @@ class MeanReversionSell:
         quote_volume = self.split_quote_volume.compute()
         up_volume, down_volume = quote_volume['sell'], quote_volume['buy']
         moving_averages = self.ema.compute()
-        above = prices / moving_averages - 1. > self.threshold
+        deviations = prices / moving_averages - 1.
+        above = deviations > self.threshold
         ape_index = up_volume / (up_volume + down_volume)
         matching = ape_index.index.intersection(above.index)
         ape_index, above = ape_index[matching], above[matching]
-        return ape_index[above]
+        sell_fraction = np.maximum(ape_index[above], 0.5)
+        hold_fraction = 1. - sell_fraction
+        # this is a way to artificially increase the rate of selling
+        rate = deviations[hold_fraction.index] / self.threshold
+        return 1. - hold_fraction / rate
 
 
 def main() -> None:
@@ -108,14 +114,16 @@ def main() -> None:
                                price_indicator=price_indicator,
                                volume_indicator=volume_indicator,
                                bid_ask_indicator=bid_ask, cool_down=cool_down,
-                               market_blacklist={'USDT-USD', 'DAI-USD'},
+                               market_blacklist={'USDT-USD', 'DAI-USD',
+                                                 'CLV-USD'},
                                stop_loss=stop_loss,
                                liquidate_on_shutdown=False,
-                               buy_order_type='limit',
-                               target_horizon=timedelta(minutes=5),
-                               sell_order_type='limit', post_only=True,
+                               buy_order_type='limit', sell_order_type='limit',
+                               buy_target_horizon=timedelta(minutes=10),
+                               sell_target_horizon=timedelta(minutes=10),
                                buy_age_limit=timedelta(seconds=15),
-                               sell_age_limit=timedelta(seconds=15))
+                               sell_age_limit=timedelta(seconds=15),
+                               post_only=True)
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()

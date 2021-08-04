@@ -146,14 +146,16 @@ class PortfolioManager:
                  bid_ask_indicator: BidAskIndicator,
                  cool_down: VolatilityCoolDown,
                  market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
-                 liquidate_on_shutdown: bool, sell_time_in_force: str = 'GTC',
-                 buy_order_type: str = 'limit', buy_time_in_force: str = 'GTC',
-                 target_horizon=timedelta(seconds=120),
-                 sell_order_type: str = 'limit', post_only: bool = False,
+                 liquidate_on_shutdown: bool, buy_order_type: str = 'limit',
+                 sell_order_type: str = 'limit',
+                 buy_time_in_force: str = 'GTC',
+                 sell_time_in_force: str = 'GTC',
+                 buy_target_horizon=timedelta(minutes=10),
+                 sell_target_horizon=timedelta(minutes=5),
                  buy_age_limit=timedelta(minutes=1),
-                 sell_age_limit=timedelta(minutes=1), index: bool = False):
-        self.index = index
-        self.target_horizon = target_horizon
+                 sell_age_limit=timedelta(minutes=1), post_only: bool = False):
+        self.buy_target_horizon = buy_target_horizon
+        self.sell_target_horizon = sell_target_horizon
         self.initialized = False
         self.post_only = post_only
         self.client = client
@@ -167,11 +169,7 @@ class PortfolioManager:
         self.usd_account_id = [account['id'] for account in accounts if
                                account['currency'] == 'USD'][0]
         self.tracker = SyncCoinbaseOrderTracker(client)
-        # avoid congesting system with dozens of tiny positions
-        self.min_position_size = Decimal('0')
-        self.max_positions = 256
-
-        self.pop_limit = Decimal('0.25')
+        self.pop_limit = Decimal('0.33')
         self.pov_limit = Decimal('0.2')
 
         self.counter = PositionCounter()
@@ -231,7 +229,8 @@ class PortfolioManager:
         self.liquidate_on_shutdown = liquidate_on_shutdown
         self.stop = False
 
-    def calculate_aum(self) -> Decimal:
+    @property
+    def aum(self) -> Decimal:
         quote_sizes = self.calculate_position_quote_sizes()
         total_size = np.sum(quote_sizes)
         return total_size + self.portfolio_available_funds
@@ -252,11 +251,9 @@ class PortfolioManager:
                 sizes[position.market] += position.size * price
         return Series({market: sizes[market] for market in self.market_info})
 
-    def calculate_spending_limits(self) -> pd.Series:
-        """
-        Calculate spending limits based on position limits.
-        """
-        size_limits = self.calculate_size_limits()
+    @property
+    def spending_limits(self) -> pd.Series:
+        size_limits = self.position_size_limits
         current_sizes = self.calculate_position_quote_sizes()
         remaining = size_limits - current_sizes
         min_limit = Decimal('0')
@@ -264,12 +261,9 @@ class PortfolioManager:
         spending_limits = remaining.where(remaining >= min_limit, min_limit)
         return spending_limits.fillna(Decimal('0')).map(Decimal)
 
-    def calculate_size_limits(self) -> pd.Series:
-        """
-        Calculate the position size limits for each market.
-        Does not depend on the actual position sizes.
-        """
-        aum_size_limit = self.calculate_aum_size_limit()
+    @property
+    def position_size_limits(self) -> pd.Series:
+        aum_size_limit = self.aum * self.pop_limit
         pov_size_limits = self.calculate_volume_size_limits()
         mv_limits = DataFrame({'aum': aum_size_limit, 'pov': pov_size_limits})
         return np.min(mv_limits, axis=1).fillna(0.).map(Decimal)
@@ -285,15 +279,6 @@ class PortfolioManager:
         quote_size_limits = self.prices * base_size_limits
         return quote_size_limits.fillna(Decimal('0'))
 
-    def calculate_aum_size_limit(self) -> Decimal:
-        """
-        This calculates the quote size limit for any position, based on AUM.
-        :return: the quote size limit of a position
-        """
-        aum = self.calculate_aum()
-        aum_limit = aum * self.pop_limit
-        return aum_limit
-
     def apply_size_limits(self, weights: pd.Series,
                           spending_limit: Decimal) -> pd.Series:
         """
@@ -303,10 +288,8 @@ class PortfolioManager:
         :param spending_limit: the amount we can spend
         :return:
         """
-        weight_limits = self.calculate_spending_limits() / spending_limit
-        markets = weights.index.intersection(weight_limits.index)
-        weights = weights.loc[markets]
-        weight_limits = weight_limits.loc[markets]
+        weight_limits = self.spending_limits / spending_limit
+        weights, weight_limits = overlapping_labels(weights, weight_limits)
         weights = weights.where(weights < weight_limits, weight_limits)
         weights = weights[weights.notna() & weights.gt(0.)]
         return weights
@@ -332,10 +315,6 @@ class PortfolioManager:
     def limit_weights(self, target_weights: Series,
                       spending_limit: Decimal) -> Series:
         nil_weights = Series([], dtype=np.float64)
-        if spending_limit < self.min_position_size:
-            return nil_weights
-        if self.counter.count == self.max_positions:
-            return nil_weights
         cooling_down = filter(self.cool_down.cooling_down,
                               target_weights.index)
         allowed = target_weights.index.difference(cooling_down)
@@ -345,14 +324,11 @@ class PortfolioManager:
             return nil_weights
         limited_weights = self.apply_size_limits(filtered_weights,
                                                  spending_limit)
-        min_weight = self.min_position_size / spending_limit
-        large_enough = limited_weights[limited_weights.gt(min_weight)]
-        if not len(large_enough):
+        if not len(limited_weights):
             return nil_weights
-        position_count_limit = self.max_positions - self.counter.count
         ranked_weights = limited_weights.sort_values(ascending=False)
-        weights = ranked_weights.head(position_count_limit)
-        weights = self.apply_exchange_size_limits(weights, spending_limit)
+        weights = self.apply_exchange_size_limits(ranked_weights,
+                                                  spending_limit)
         logger.debug(weights)
         return weights
 
@@ -462,8 +438,12 @@ class PortfolioManager:
             elif info['cancel_only']:
                 self.counter.decrement()
                 continue
-            price = buy.price.quantize(Decimal(info['quote_increment']),
-                                       rounding='ROUND_DOWN')
+            if buy.market not in self.bids:
+                self.counter.decrement()
+                continue
+            bid = self.bids[buy.market]
+            price = bid.quantize(Decimal(info['quote_increment']),
+                                 rounding='ROUND_DOWN')
             size = buy.size.quantize(Decimal(info['base_increment']),
                                      rounding='ROUND_DOWN')
             min_size = Decimal(info['base_min_size'])
@@ -801,7 +781,10 @@ class PortfolioManager:
                 next_generation.append(sell)
                 continue
             quote_increment = Decimal(market_info['quote_increment'])
-            price = sell.price.quantize(quote_increment)
+            if sell.market not in self.asks:
+                next_generation.append(sell)
+                continue
+            price = self.asks[sell.market].quantize(quote_increment)
             post_only = market_info['post_only'] or self.post_only
             tif = 'GTC' if post_only else self.sell_time_in_force
             kwargs = dict(product_id=sell.market,
@@ -841,7 +824,6 @@ class PortfolioManager:
         next_generation: t.List[PendingLimitSell] = []
         for sell in self.pending_limit_sells:
             order_id = sell.order_id
-            market_info = self.market_info[sell.market]
             if sell.created_at > self.tick_time:
                 # created during this generation, nothing to see here
                 next_generation.append(sell)
@@ -849,12 +831,17 @@ class PortfolioManager:
             if order_id not in self.orders:
                 self.tracker.forget(order_id)
                 # External cancellation of pending order
-                desired_sell = DesiredMarketSell(market=sell.market,
-                                                 size=sell.size,
-                                                 previous_state=sell,
-                                                 state_change='ext. cancel')
-                logger.debug(desired_sell)
-                self.desired_market_sells.append(desired_sell)
+                if sell.market not in self.asks:
+                    next_generation.append(sell)
+                else:
+                    price = self.asks[sell.market]
+                    desired_sell = DesiredLimitSell(market=sell.market,
+                                                    price=price,
+                                                    size=sell.size,
+                                                    previous_state=sell,
+                                                    state_change='cancelled')
+                    logger.debug(desired_sell)
+                    self.desired_limit_sells.append(desired_sell)
                 continue
             order = self.orders[order_id]
             status = order['status']
@@ -930,23 +917,13 @@ class PortfolioManager:
         self.set_fee()
         buy_targets = self.buy_indicator.compute(candles)
         sell_targets = self.sell_indicator.compute(candles)
-        if self.index:
-            qv = candles.quote_volume.unstack('market').sum()
-            cash = self.calculate_cash_balances(qv)
-            holdings = self.calculate_position_quote_sizes().map(float)
-            ratio = calculate_ratios(cash, holdings)
-        else:
-            holdings = self.calculate_position_quote_sizes().sum()
-            funds = self.portfolio_available_funds
-            ratio = float(holdings / funds)
         if last_tick_time:
-            horizon_total_seconds = self.target_horizon.total_seconds()
-            buy_horizon = np.sqrt(ratio) * horizon_total_seconds
-            sell_horizon = np.sqrt(1 / ratio) * horizon_total_seconds
+            buy_horizon_seconds = self.buy_target_horizon.total_seconds()
+            sell_horizon_seconds = self.sell_target_horizon.total_seconds()
             last_tick_duration = tick_time - last_tick_time
             duration = last_tick_duration.total_seconds()
-            buy_target_periods = np.floor(buy_horizon / duration)
-            sell_target_periods = np.floor(sell_horizon / duration)
+            buy_target_periods = np.floor(buy_horizon_seconds / duration)
+            sell_target_periods = np.floor(sell_horizon_seconds / duration)
         else:
             buy_target_periods = pd.Series([], dtype=np.float64)
             sell_target_periods = pd.Series([], dtype=np.float64)
