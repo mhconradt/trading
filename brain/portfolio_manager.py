@@ -170,7 +170,7 @@ class PortfolioManager:
                                account['currency'] == 'USD'][0]
         self.tracker = SyncCoinbaseOrderTracker(client)
         self.pop_limit = Decimal('0.33')
-        self.pov_limit = Decimal('0.2')
+        self.pov_limit = Decimal('1')
 
         self.counter = PositionCounter()
 
@@ -625,6 +625,9 @@ class PortfolioManager:
             if position.size < min_size:
                 next_generation.append(position)
                 continue
+            elif market not in self.prices:
+                next_generation.append(position)
+                continue
             increment = Decimal(market_info['base_increment'])
             sell_fraction = self.sell_weights.get(market, Decimal(0))
             incremental_sell_size = compute_sell_size(position.size,
@@ -878,7 +881,7 @@ class PortfolioManager:
                                                     size=remainder,
                                                     price=price,
                                                     previous_state=sell,
-                                                    state_change='ext cancel')
+                                                    state_change='cancelled')
                     logger.debug(desired_sell)
                     self.desired_limit_sells.append(desired_sell)
             else:
@@ -904,6 +907,8 @@ class PortfolioManager:
             self.counter.decrement()
 
     def set_tick_variables(self) -> None:
+        self.set_market_info()
+        self.set_fee()
         self.set_portfolio_available_funds()
         candles = self.candles_src.compute()
         volume = self.volume_indicator.compute(candles)
@@ -913,8 +918,6 @@ class PortfolioManager:
         tick_time, self.orders = self.tracker.barrier_snapshot()
         last_tick_time = self.tick_time
         self.tick_time = tick_time
-        self.set_market_info()
-        self.set_fee()
         buy_targets = self.buy_indicator.compute(candles)
         sell_targets = self.sell_indicator.compute(candles)
         if last_tick_time:
