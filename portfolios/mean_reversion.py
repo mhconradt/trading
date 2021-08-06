@@ -47,9 +47,9 @@ class MeanReversionBuy:
         ape_index = down_volume / (down_volume + up_volume)
         ape_volume = down_volume * ape_index
         down_flow_fraction = ape_volume / ape_volume.sum()
-        markets = down_flow_fraction.index.intersection(below.index)
+        markets = below[below].index.intersection(down_flow_fraction.index)
         down_flow_fraction, below = down_flow_fraction[markets], below[markets]
-        adjustment = deviation[markets] / self.threshold
+        adjustment = np.log2(deviation[markets] / self.threshold) + 1.
         buy_targets = 1. - (1. - down_flow_fraction[below]) ** adjustment
         return buy_targets
 
@@ -60,6 +60,7 @@ class MeanReversionSell:
         self.threshold = 0.001
         self.periods = periods
         self.ema = TripleEMA(db, periods, frequency)
+        self.split_quote_volume = SplitQuoteVolume(db, 1, frequency)
 
     @property
     def periods_required(self) -> int:
@@ -68,13 +69,16 @@ class MeanReversionSell:
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         prices = candles.close.unstack('market').iloc[-1]
         moving_averages = self.ema.compute()
+        quote_volume = self.split_quote_volume.compute()
+        up_volume, down_volume = quote_volume['sell'], quote_volume['buy']
+        ape_index = up_volume / (up_volume + down_volume)
         deviations = prices / moving_averages - 1.
         above = deviations > self.threshold
-        sell_markets = above[above].index
-        # x = y = 1/2 is the solution for x + y = 1 and x = y
-        hold_fraction = np.ones_like(sell_markets) / 2.
+        sell_markets = above[above].index.intersection(ape_index.index)
+        # sell more quickly if it's quite apish
+        hold_fraction = 1. - np.maximum(0.5, ape_index[sell_markets])
         # always >= 1.0
-        adjustment = deviations[sell_markets] / self.threshold
+        adjustment = np.log2(deviations[sell_markets] / self.threshold) + 1.
         # increase the rate of selling with larger deviations
         return 1. - hold_fraction ** adjustment
 
@@ -96,8 +100,8 @@ def main() -> None:
     sell_indicator = MeanReversionSell(client, periods=EMA_PERIODS,
                                        frequency=FREQUENCY)
     volume_indicator = TrailingVolume(periods=1)
-    price_indicator = Ticker(periods=1)
-    bid_ask = BidAsk(client, period=timedelta(minutes=1))
+    price_indicator = Ticker(periods=2)
+    bid_ask = BidAsk(client, period=timedelta(minutes=2))
     candle_periods = max(buy_indicator.periods_required,
                          sell_indicator.periods_required,
                          volume_indicator.periods_required, )

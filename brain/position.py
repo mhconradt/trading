@@ -33,6 +33,15 @@ class PositionState(ABC):
                 state = state.previous_state
         raise ValueError("State has no last active position")
 
+    def cumulative_fees(self) -> Decimal:
+        state = self
+        fees = Decimal('0')
+        while state:
+            if hasattr(state, 'fees') and isinstance(state.fees, Decimal):
+                fees += state.fees
+            state = state.previous_state
+        return fees
+
 
 @dataclass(repr=False)
 class RootState(PositionState):
@@ -211,7 +220,6 @@ class DesiredLimitSell(PositionState):
     Sell at most .size of .base for at least .price in .quote.
     """
 
-    price: Decimal
     size: Decimal
     market: str
     state_slug: str = 'desired_limit_sell'

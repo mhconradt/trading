@@ -625,7 +625,7 @@ class PortfolioManager:
             if position.size < min_size:
                 next_generation.append(position)
                 continue
-            elif market not in self.prices:
+            if market not in self.prices:
                 next_generation.append(position)
                 continue
             increment = Decimal(market_info['base_increment'])
@@ -643,9 +643,8 @@ class PortfolioManager:
                     self.counter.increment()
                 sell_fraction = sell_size / position.size
                 state_change = f'sell {sell_fraction:.3f}'
-                if self.sell_order_type == 'limit' and market in self.asks:
+                if self.sell_order_type == 'limit':
                     sell = DesiredLimitSell(size=sell_size,
-                                            price=self.asks.loc[market],
                                             market=market,
                                             previous_state=position,
                                             state_change=state_change)
@@ -683,11 +682,7 @@ class PortfolioManager:
                 continue
             elif info['post_only'] or info['limit_only']:
                 transition = 'post only' if info['post_only'] else 'limit only'
-                if sell.market not in self.asks:
-                    next_generation.append(sell)  # neanderthal retry
-                    continue
-                limit_sell = DesiredLimitSell(price=self.asks[sell.market],
-                                              size=sell.size,
+                limit_sell = DesiredLimitSell(size=sell.size,
                                               market=sell.market,
                                               previous_state=sell,
                                               state_change=transition, )
@@ -779,6 +774,18 @@ class PortfolioManager:
         """
         next_generation: t.List[DesiredLimitSell] = []
         for sell in self.desired_limit_sells:
+            if not self.sell_weights.get(sell.market, 0.) > 0.:
+                position = ActivePosition(
+                    market=sell.market,
+                    size=sell.size,
+                    price=sell.last_active_price(),
+                    previous_state=sell,
+                    fees=sell.cumulative_fees(),
+                    start=self.tick_time,
+                    state_change='backed off'
+                )
+                self.active_positions.append(position)
+                continue
             market_info = self.market_info[sell.market]
             if market_info['trading_disabled']:
                 next_generation.append(sell)
@@ -801,8 +808,18 @@ class PortfolioManager:
             if 'id' not in order:
                 # this means the market moved up
                 if order.get('message') == 'Post only mode':
-                    sell.price = self.asks[sell.market]
                     next_generation.append(sell)
+                else:
+                    position = ActivePosition(
+                        market=sell.market,
+                        size=sell.size,
+                        price=sell.last_active_price(),
+                        previous_state=sell,
+                        fees=sell.cumulative_fees(),
+                        start=self.tick_time,
+                        state_change='sell error'
+                    )
+                    self.active_positions.append(position)
                 logger.debug(f"Error placing order {order} {sell}")
                 continue
             order_id = order['id']
@@ -834,17 +851,12 @@ class PortfolioManager:
             if order_id not in self.orders:
                 self.tracker.forget(order_id)
                 # External cancellation of pending order
-                if sell.market not in self.asks:
-                    next_generation.append(sell)
-                else:
-                    price = self.asks[sell.market]
-                    desired_sell = DesiredLimitSell(market=sell.market,
-                                                    price=price,
-                                                    size=sell.size,
-                                                    previous_state=sell,
-                                                    state_change='cancelled')
-                    logger.debug(desired_sell)
-                    self.desired_limit_sells.append(desired_sell)
+                desired_sell = DesiredLimitSell(market=sell.market,
+                                                size=sell.size,
+                                                previous_state=sell,
+                                                state_change='cancelled')
+                logger.debug(desired_sell)
+                self.desired_limit_sells.append(desired_sell)
                 continue
             order = self.orders[order_id]
             status = order['status']
@@ -857,7 +869,6 @@ class PortfolioManager:
                 continue
             elif status == 'done':
                 self.tracker.forget(order_id)
-                # external cancellation without being filled
                 executed_value = Decimal(order['executed_value'])
                 filled_size = Decimal(order['filled_size'])
                 self.counter.decrement()
@@ -876,10 +887,8 @@ class PortfolioManager:
                     self.sells.append(sold)
                 if remainder:
                     self.counter.increment()
-                    price = self.asks[sell.market]
                     desired_sell = DesiredLimitSell(market=sell.market,
                                                     size=remainder,
-                                                    price=price,
                                                     previous_state=sell,
                                                     state_change='cancelled')
                     logger.debug(desired_sell)
