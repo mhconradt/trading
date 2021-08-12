@@ -27,7 +27,8 @@ class TripleEMA:
               |> tripleEMA(n: periods)
               |> yield(name: "ema")
         """
-        start = -(3 * self.periods - 2) * self.frequency
+        calculation_periods = 3 * self.periods - 2
+        start = -calculation_periods * self.frequency
         params = {'periods': self.periods, 'start': start,
                   'frequency': self.frequency}
         index = ['market', '_time']

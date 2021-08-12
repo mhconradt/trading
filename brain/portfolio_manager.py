@@ -114,7 +114,7 @@ def compute_sell_size(size: Decimal, fraction: Decimal,
     l1_sell_size = compute_l1_sell_size(size, fraction, min_size,
                                         increment)
     if (size - l1_sell_size) < min_size:
-        return size
+        return size.quantize(increment, rounding='ROUND_DOWN')
     else:
         return l1_sell_size
 
@@ -726,7 +726,7 @@ class PortfolioManager:
                 desired_sell = DesiredMarketSell(market=sell.market,
                                                  size=sell.size,
                                                  previous_state=sell,
-                                                 state_change='ext. cancelled')
+                                                 state_change='ext. canceled')
                 logger.debug(desired_sell)
                 self.desired_market_sells.append(desired_sell)
                 continue
@@ -755,7 +755,7 @@ class PortfolioManager:
                     self.sells.append(sold)
                 if remainder:
                     self.counter.increment()
-                    transition = 'ext. cancelled'
+                    transition = 'ext. canceled'
                     desired_sell = DesiredMarketSell(market=sell.market,
                                                      size=remainder,
                                                      previous_state=sell,
@@ -854,7 +854,7 @@ class PortfolioManager:
                 desired_sell = DesiredLimitSell(market=sell.market,
                                                 size=sell.size,
                                                 previous_state=sell,
-                                                state_change='cancelled')
+                                                state_change='canceled')
                 logger.debug(desired_sell)
                 self.desired_limit_sells.append(desired_sell)
                 continue
@@ -890,7 +890,7 @@ class PortfolioManager:
                     desired_sell = DesiredLimitSell(market=sell.market,
                                                     size=remainder,
                                                     previous_state=sell,
-                                                    state_change='cancelled')
+                                                    state_change='canceled')
                     logger.debug(desired_sell)
                     self.desired_limit_sells.append(desired_sell)
             else:

@@ -21,8 +21,8 @@ EXCHANGE_NAME = 'coinbasepro'
 def initialize_watermarks(influx_client: InfluxDBClient,
                           bucket: str,
                           products: t.List[str]) -> dict:
-    query_api = influx_client.query_api()
     window = timedelta(minutes=180)
+    query_api = influx_client.query_api()
     result = query_api.query_data_frame("""
         from(bucket: bucket)
             |> range(start: window_start)
@@ -174,9 +174,9 @@ def main() -> None:
                                      org=influx_db_settings.INFLUX_ORG,
                                      bucket="tickers")
     while True:
-        trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 16),
+        trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 32),
                                              watermarks)
-        ticker_handler = TickerHandler(ticker_sink)
+        ticker_handler = TickerHandler(BatchingSink(ticker_sink, 16))
         trade_client = RouterClient({trade_handler: ['match', 'last_match'],
                                      ticker_handler: ['ticker']},
                                     channels=['matches', 'ticker'],

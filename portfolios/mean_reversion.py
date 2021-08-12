@@ -24,6 +24,8 @@ EMA_PERIODS = 26
 logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
                     level=logging.DEBUG)
 
+logger = logging.getLogger(__name__)
+
 
 class MeanReversionBuy:
     def __init__(self, db: InfluxDBClient, periods: int = 26,
@@ -41,17 +43,18 @@ class MeanReversionBuy:
         prices = candles.close.unstack('market').iloc[-1]
         quote_volume = self.split_quote_volume.compute()
         up_volume, down_volume = quote_volume['sell'], quote_volume['buy']
+        total_volume = up_volume + down_volume
+        ape_index = down_volume / total_volume
+        volume_fraction = total_volume / total_volume.sum()
         moving_averages = self.ema.compute()
         deviation = 1 - (prices / moving_averages)
         below = deviation > self.threshold
-        ape_index = down_volume / (down_volume + up_volume)
-        ape_volume = down_volume * ape_index
-        down_flow_fraction = ape_volume / ape_volume.sum()
-        markets = below[below].index.intersection(down_flow_fraction.index)
-        down_flow_fraction, below = down_flow_fraction[markets], below[markets]
-        adjustment = np.log2(deviation[markets] / self.threshold) + 1.
-        buy_targets = 1. - (1. - down_flow_fraction[below]) ** adjustment
-        return buy_targets
+        markets = below[below].index.intersection(quote_volume.index)
+        adjustment = np.log2(deviation[markets] / self.threshold)
+        hold_fraction = 1. - ape_index[markets]
+        hold_fraction = hold_fraction ** adjustment
+        buy_fraction = 1. - hold_fraction
+        return buy_fraction * volume_fraction[markets]
 
 
 class MeanReversionSell:
@@ -78,9 +81,9 @@ class MeanReversionSell:
         # sell more quickly if it's quite apish
         hold_fraction = 1. - np.maximum(0.5, ape_index[sell_markets])
         # always >= 1.0
-        adjustment = np.log2(deviations[sell_markets] / self.threshold) + 1.
+        acceleration = np.log2(deviations[sell_markets] / self.threshold)
         # increase the rate of selling with larger deviations
-        return 1. - hold_fraction ** adjustment
+        return 1. - hold_fraction ** acceleration
 
 
 def main() -> None:
@@ -119,8 +122,8 @@ def main() -> None:
                                stop_loss=stop_loss,
                                liquidate_on_shutdown=False,
                                buy_order_type='limit', sell_order_type='limit',
-                               buy_target_horizon=timedelta(minutes=10),
-                               sell_target_horizon=timedelta(minutes=10),
+                               buy_target_horizon=timedelta(minutes=5),
+                               sell_target_horizon=timedelta(minutes=5),
                                buy_age_limit=timedelta(seconds=15),
                                sell_age_limit=timedelta(seconds=15),
                                post_only=True)
