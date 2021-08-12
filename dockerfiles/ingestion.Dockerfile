@@ -10,4 +10,4 @@ COPY .. .
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python3", "-m", "realtime_ingest.trades"]
+CMD ["python3", "-m", "realtime_ingest.level1"]

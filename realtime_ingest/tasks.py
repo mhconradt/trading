@@ -156,11 +156,8 @@ class TaskDefinition:
         return None
 
 
-candles_1m = TaskDefinition('trades', name='candles_1m', every='1m',
-                            offset='5s', dst='candles')
-
-l1_candles_1m = TaskDefinition('level1', name='l1_candles_1m', every='1m',
-                               offset='6s', dst='candles')
+candles_1m = TaskDefinition('level1', name='candles_1m', every='1m',
+                            offset='1s', dst='candles')
 
 
 def main():
@@ -177,14 +174,8 @@ def main():
 def create_all(_influx, org_id,
                org):
     tasks_api = _influx.tasks_api()
-    candles_1m.initialize(tasks_api, id='candles_1m',
-                          org_id=org_id,
-                          org=org)
+    candles_1m.initialize(tasks_api, id='candles_1m', org_id=org_id, org=org)
     candles_1m.create()
-    l1_candles_1m.initialize(tasks_api, id='l1_candles_1m',
-                             org_id=org_id,
-                             org=org)
-    l1_candles_1m.create()
 
 
 if __name__ == '__main__':

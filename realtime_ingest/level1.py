@@ -162,7 +162,7 @@ def main() -> None:
     replay.initialize(influx_client.tasks_api())
     create_all(influx_client, org_id=influx_db_settings.INFLUX_ORG_ID,
                org=influx_db_settings.INFLUX_ORG)
-    watermarks = initialize_watermarks(influx_client, "trades", products)
+    watermarks = initialize_watermarks(influx_client, "level1", products)
     writer = influx_client.write_api(write_options=SYNCHRONOUS)
     trade_sink = InfluxDBTradeSink(EXCHANGE_NAME,
                                    writer,
@@ -174,27 +174,12 @@ def main() -> None:
                                      org_id=influx_db_settings.INFLUX_ORG_ID,
                                      org=influx_db_settings.INFLUX_ORG,
                                      bucket="level1")
-    _trade_sink = InfluxDBTradeSink(EXCHANGE_NAME,
-                                    writer,
-                                    org_id=influx_db_settings.INFLUX_ORG_ID,
-                                    org=influx_db_settings.INFLUX_ORG,
-                                    bucket="trades")
-    _ticker_sink = InfluxDBTickerSink(EXCHANGE_NAME,
-                                      writer,
-                                      org_id=influx_db_settings.INFLUX_ORG_ID,
-                                      org=influx_db_settings.INFLUX_ORG,
-                                      bucket="tickers")
     while True:
         trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 32),
                                              watermarks)
         ticker_handler = TickerHandler(BatchingSink(ticker_sink, 16))
-        _trade_handler = TradesMessageHandler(BatchingSink(_trade_sink, 32),
-                                              watermarks)
-        _ticker_handler = TickerHandler(BatchingSink(_ticker_sink, 16))
         ws_client = RouterClient({trade_handler: ['match', 'last_match'],
-                                  ticker_handler: ['ticker'],
-                                  _trade_handler: ['match', 'last_match'],
-                                  _ticker_handler: ['ticker'], },
+                                  ticker_handler: ['ticker'], },
                                  channels=['matches', 'ticker'],
                                  products=products)
         try:
@@ -205,12 +190,11 @@ def main() -> None:
             break
         finally:
             # catch up from last state
-            watermarks = initialize_watermarks(influx_client, "trades",
+            watermarks = initialize_watermarks(influx_client, "level1",
                                                products)
             # out here so it doesn't wait on keyboard interrupt
             print('howdy')
             ws_client.close()  # this can block
-        time.sleep(1)
     if ws_client.error:
         sys.exit(1)
     else:

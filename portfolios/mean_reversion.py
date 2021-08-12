@@ -17,9 +17,9 @@ from indicators.sliding_candles import CandleSticks
 from settings import influx_db as influx_db_settings, \
     coinbase as coinbase_settings, portfolio as portfolio_settings
 
-TRADE_BUCKET = 'trades'
+TRADE_BUCKET = 'level1'
 
-TICKER_BUCKET = 'tickers'
+TICKER_BUCKET = 'level1'
 
 FREQUENCY = timedelta(minutes=1)
 
