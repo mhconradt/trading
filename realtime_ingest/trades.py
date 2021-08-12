@@ -23,17 +23,18 @@ def initialize_watermarks(influx_client: InfluxDBClient,
                           products: t.List[str]) -> dict:
     window = timedelta(minutes=180)
     query_api = influx_client.query_api()
+    params = {'bucket': bucket,
+              'start': -window}
     result = query_api.query_data_frame("""
         from(bucket: bucket)
-            |> range(start: window_start)
+            |> range(start: start)
             |> filter(fn: (r) => r["_measurement"] == "matches")
             |> filter(fn: (r) => r["_field"] == "trade_id")
             |> filter(fn: (r) => r["exchange"] == "coinbasepro")
             |> keep(columns: ["market", "_value", "_time"])
             |> aggregateWindow(every: 2d, fn: max, createEmpty: false)
             |> yield(name: "watermark")
-    """, data_frame_index=['market'], params={'bucket': bucket,
-                                              'window_start': -window})
+    """, data_frame_index=['market'], params=params)
     if not len(result):  # starting from scratch
         return watermarks_at_time(get_server_time() - window, products)
     watermarks = result['_value'].to_dict()
@@ -174,16 +175,16 @@ def main() -> None:
                                      org=influx_db_settings.INFLUX_ORG,
                                      bucket="tickers")
     while True:
-        trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 32),
-                                             watermarks)
-        ticker_handler = TickerHandler(BatchingSink(ticker_sink, 16))
-        trade_client = RouterClient({trade_handler: ['match', 'last_match'],
-                                     ticker_handler: ['ticker']},
-                                    channels=['matches', 'ticker'],
-                                    products=products)
+        _trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 32),
+                                              watermarks)
+        _ticker_handler = TickerHandler(BatchingSink(ticker_sink, 16))
+        ws_client = RouterClient({_trade_handler: ['match', 'last_match'],
+                                  _ticker_handler: ['ticker']},
+                                 channels=['matches', 'ticker'],
+                                 products=products)
         try:
-            trade_client.start()
-            while not trade_client.stop:
+            ws_client.start()
+            while not ws_client.stop:
                 time.sleep(1)
         except KeyboardInterrupt:
             break
@@ -193,9 +194,9 @@ def main() -> None:
                                                products)
             # out here so it doesn't wait on keyboard interrupt
             print('howdy')
-            trade_client.close()  # this can block
+            ws_client.close()  # this can block
         time.sleep(1)
-    if trade_client.error:
+    if ws_client.error:
         sys.exit(1)
     else:
         sys.exit(0)

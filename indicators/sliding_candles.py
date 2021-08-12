@@ -12,30 +12,29 @@ logger = logging.getLogger(__name__)
 
 class CandleSticks:
     def __init__(self, db: InfluxDBClient, exchange: str, periods: int,
-                 frequency: timedelta, offset=0):
+                 frequency: timedelta, bucket: str):
+        self.bucket = bucket
         self.db = db
         self.frequency = frequency
         self.exchange = exchange
         self.periods = periods
-        self.offset = offset
 
     def compute(self) -> pd.DataFrame:
         _start = time.time()
         query_api = self.db.query_api()
-        start = -(self.periods + self.offset) * self.frequency
-        stop = -self.offset * self.frequency
+        start = -self.periods * self.frequency
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
                       'start': start,
-                      'stop': stop}
+                      'bucket': self.bucket}
         raw_df = query_api.query_data_frame("""
             import "date"
             
             offset = duration(v: int(v: now()) - int(v: date.truncate(t: now(),
                                                      unit: freq)))    
 
-            trades = from(bucket: "trades")
-                |> range(start: start, stop: stop)
+            trades = from(bucket: bucket)
+                |> range(start: start)
                 |> filter(fn: (r) => r["_measurement"] == "matches")
                 |> filter(fn: (r) => r["_field"] == "price" 
                                      or r["_field"] == "size")
@@ -98,7 +97,7 @@ def main():
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG)
     candles = CandleSticks(influx_client, 'coinbasepro', 30,
-                           timedelta(minutes=1))
+                           timedelta(minutes=1), 'trades')
     while True:
         start = time.time()
         values = candles.compute()

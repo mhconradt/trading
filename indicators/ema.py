@@ -55,7 +55,8 @@ def main():
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG)
     ema = TripleEMA(_influx, 26, timedelta(minutes=1))
-    candles = CandleSticks(_influx, 'coinbasepro', 5, timedelta(minutes=1))
+    candles = CandleSticks(_influx, 'coinbasepro', 5, timedelta(minutes=1),
+                           'trades')
     while True:
         try:
             _start = time.time()

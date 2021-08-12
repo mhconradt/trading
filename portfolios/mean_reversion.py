@@ -17,6 +17,10 @@ from indicators.sliding_candles import CandleSticks
 from settings import influx_db as influx_db_settings, \
     coinbase as coinbase_settings, portfolio as portfolio_settings
 
+TRADE_BUCKET = 'trades'
+
+TICKER_BUCKET = 'tickers'
+
 FREQUENCY = timedelta(minutes=1)
 
 EMA_PERIODS = 26
@@ -33,7 +37,8 @@ class MeanReversionBuy:
         self.threshold = 0.001
         self.periods = periods
         self.ema = TripleEMA(db, periods, frequency)
-        self.split_quote_volume = SplitQuoteVolume(db, 1, frequency)
+        self.split_quote_volume = SplitQuoteVolume(db, 1, frequency,
+                                                   TRADE_BUCKET)
 
     @property
     def periods_required(self) -> int:
@@ -50,7 +55,7 @@ class MeanReversionBuy:
         deviation = 1 - (prices / moving_averages)
         below = deviation > self.threshold
         markets = below[below].index.intersection(quote_volume.index)
-        adjustment = np.log2(deviation[markets] / self.threshold)
+        adjustment = np.log(deviation[markets] / self.threshold)
         hold_fraction = 1. - ape_index[markets]
         hold_fraction = hold_fraction ** adjustment
         buy_fraction = 1. - hold_fraction
@@ -63,7 +68,8 @@ class MeanReversionSell:
         self.threshold = 0.001
         self.periods = periods
         self.ema = TripleEMA(db, periods, frequency)
-        self.split_quote_volume = SplitQuoteVolume(db, 1, frequency)
+        self.split_quote_volume = SplitQuoteVolume(db, 1, frequency,
+                                                   TRADE_BUCKET)
 
     @property
     def periods_required(self) -> int:
@@ -81,7 +87,7 @@ class MeanReversionSell:
         # sell more quickly if it's quite apish
         hold_fraction = 1. - np.maximum(0.5, ape_index[sell_markets])
         # always >= 1.0
-        acceleration = np.log2(deviations[sell_markets] / self.threshold)
+        acceleration = np.log(deviations[sell_markets] / self.threshold)
         # increase the rate of selling with larger deviations
         return 1. - hold_fraction ** acceleration
 
@@ -103,14 +109,13 @@ def main() -> None:
     sell_indicator = MeanReversionSell(client, periods=EMA_PERIODS,
                                        frequency=FREQUENCY)
     volume_indicator = TrailingVolume(periods=1)
-    price_indicator = Ticker(periods=2)
-    bid_ask = BidAsk(client, period=timedelta(minutes=2))
+    price_indicator = Ticker(periods=1)
+    bid_ask = BidAsk(client, period=timedelta(minutes=1), bucket=TICKER_BUCKET)
     candle_periods = max(buy_indicator.periods_required,
                          sell_indicator.periods_required,
                          volume_indicator.periods_required, )
     candles_src = CandleSticks(client, portfolio_settings.EXCHANGE,
-                               candle_periods,
-                               FREQUENCY, offset=0)
+                               candle_periods, FREQUENCY, TRADE_BUCKET)
     manager = PortfolioManager(coinbase, candles_src,
                                buy_indicator=buy_indicator,
                                sell_indicator=sell_indicator,

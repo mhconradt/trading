@@ -53,7 +53,8 @@ def main():
                             org=influx_db_settings.INFLUX_ORG)
     indicator = TrendVariance(periods=5)
     alt_indicator = AltTrendVariance(periods=5)
-    candles = CandleSticks(influx, 'coinbasepro', 5, timedelta(minutes=1))
+    candles = CandleSticks(influx, 'coinbasepro', 5, timedelta(minutes=1),
+                           'trades')
     while True:
         _start = time.time()
         candle_data = candles.compute()

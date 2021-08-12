@@ -35,7 +35,9 @@ class TrailingQuoteVolume:
 
 
 class SplitQuoteVolume:
-    def __init__(self, db: InfluxDBClient, periods: int, frequency: timedelta):
+    def __init__(self, db: InfluxDBClient, periods: int, frequency: timedelta,
+                 bucket: str):
+        self.bucket = bucket
         self.db = db
         self.periods = periods
         self.frequency = frequency
@@ -43,8 +45,10 @@ class SplitQuoteVolume:
     def compute(self) -> pd.DataFrame:
         _start = time.time()
         query_api = self.db.query_api()
+        params = {'start': -1 * self.periods * self.frequency,
+                  'bucket': self.bucket}
         query = """
-            from(bucket: "trades")
+            from(bucket: bucket)
               |> range(start: start)
               |> filter(fn: (r) => r["_measurement"] == "matches")
               |> filter(fn: (r) => r["_field"] == "price" or r["_field"] == "size")
@@ -56,7 +60,6 @@ class SplitQuoteVolume:
               |> pivot(columnKey: ["side"], rowKey: ["market"], valueColumn: "_value")
               |> yield(name: "split")
         """
-        params = {'start': -1 * self.periods * self.frequency}
         raw_df = query_api.query_data_frame(query, params=params,
                                             data_frame_index=['market'])
         if isinstance(raw_df, list):
@@ -76,9 +79,9 @@ def main():
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG)
     src = CandleSticks(influx_client, 'coinbasepro', 5,
-                       frequency=timedelta(minutes=1), offset=0)
+                       frequency=timedelta(minutes=1), bucket='trades')
     qv = TrailingQuoteVolume(5)
-    splits = SplitQuoteVolume(influx_client, 5, timedelta(minutes=1))
+    splits = SplitQuoteVolume(influx_client, 5, timedelta(minutes=1), 'trades')
     total = 0.
     while True:
         try:

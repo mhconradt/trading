@@ -169,7 +169,7 @@ class PortfolioManager:
         self.usd_account_id = [account['id'] for account in accounts if
                                account['currency'] == 'USD'][0]
         self.tracker = SyncCoinbaseOrderTracker(client)
-        self.pop_limit = Decimal('0.33')
+        self.pop_limit = Decimal('0.3')
         self.pov_limit = Decimal('1')
 
         self.counter = PositionCounter()
