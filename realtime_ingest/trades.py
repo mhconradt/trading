@@ -168,18 +168,33 @@ def main() -> None:
                                    writer,
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG,
-                                   bucket="trades")
+                                   bucket="level1")
     ticker_sink = InfluxDBTickerSink(EXCHANGE_NAME,
                                      writer,
                                      org_id=influx_db_settings.INFLUX_ORG_ID,
                                      org=influx_db_settings.INFLUX_ORG,
-                                     bucket="tickers")
+                                     bucket="level1")
+    _trade_sink = InfluxDBTradeSink(EXCHANGE_NAME,
+                                    writer,
+                                    org_id=influx_db_settings.INFLUX_ORG_ID,
+                                    org=influx_db_settings.INFLUX_ORG,
+                                    bucket="trades")
+    _ticker_sink = InfluxDBTickerSink(EXCHANGE_NAME,
+                                      writer,
+                                      org_id=influx_db_settings.INFLUX_ORG_ID,
+                                      org=influx_db_settings.INFLUX_ORG,
+                                      bucket="tickers")
     while True:
-        _trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 32),
+        trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 32),
+                                             watermarks)
+        ticker_handler = TickerHandler(BatchingSink(ticker_sink, 16))
+        _trade_handler = TradesMessageHandler(BatchingSink(_trade_sink, 32),
                                               watermarks)
-        _ticker_handler = TickerHandler(BatchingSink(ticker_sink, 16))
-        ws_client = RouterClient({_trade_handler: ['match', 'last_match'],
-                                  _ticker_handler: ['ticker']},
+        _ticker_handler = TickerHandler(BatchingSink(_ticker_sink, 16))
+        ws_client = RouterClient({trade_handler: ['match', 'last_match'],
+                                  ticker_handler: ['ticker'],
+                                  _trade_handler: ['match', 'last_match'],
+                                  _ticker_handler: ['ticker'], },
                                  channels=['matches', 'ticker'],
                                  products=products)
         try:
