@@ -7,11 +7,10 @@ import cbpro
 from influxdb_client import InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
 
-from helper.coinbase import PublicClient, get_server_time
+from helper.coinbase import PublicClient
 from realtime_ingest.sink import RecordSink, InfluxDBTradeSink, \
     InfluxDBTickerSink, BatchingSink, InfluxDBPointSink
 from realtime_ingest.tasks import replay, create_all
-from realtime_ingest.watermarks import watermarks_at_time
 from settings import influx_db as influx_db_settings
 
 EXCHANGE_NAME = 'coinbasepro'
@@ -20,7 +19,7 @@ EXCHANGE_NAME = 'coinbasepro'
 def initialize_watermarks(influx_client: InfluxDBClient,
                           bucket: str,
                           products: t.List[str]) -> dict:
-    window = timedelta(minutes=180)
+    window = timedelta(minutes=5)
     query_api = influx_client.query_api()
     params = {'bucket': bucket,
               'start': -window}
@@ -34,15 +33,10 @@ def initialize_watermarks(influx_client: InfluxDBClient,
             |> aggregateWindow(every: 2d, fn: max, createEmpty: false)
             |> yield(name: "watermark")
     """, data_frame_index=['market'], params=params)
-    if not len(result):  # starting from scratch
-        return watermarks_at_time(get_server_time() - window, products)
     watermarks = result['_value'].to_dict()
     watermarks = {market: watermark for market, watermark in watermarks.items()
                   if market in products}
-    remaining = set(products).difference(watermarks)
-    remaining_watermarks = watermarks_at_time(get_server_time() - window,
-                                              remaining)
-    return {**watermarks, **remaining_watermarks}
+    return watermarks
 
 
 def catchup(product: str, frm: int, to: int) -> t.Iterable[dict]:
@@ -153,8 +147,6 @@ class TradesMessageHandler(MessageHandler):
 def main() -> None:
     quote_currencies = {'USD', 'USDT', 'USDC'}
     client = PublicClient()
-    products = [product['id'] for product in client.get_products()
-                if product['quote_currency'] in quote_currencies]
     influx_client = InfluxDBClient(influx_db_settings.INFLUX_URL,
                                    influx_db_settings.INFLUX_TOKEN,
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
@@ -162,7 +154,6 @@ def main() -> None:
     replay.initialize(influx_client.tasks_api())
     create_all(influx_client, org_id=influx_db_settings.INFLUX_ORG_ID,
                org=influx_db_settings.INFLUX_ORG)
-    watermarks = initialize_watermarks(influx_client, "level1", products)
     writer = influx_client.write_api(write_options=SYNCHRONOUS)
     point_sink = InfluxDBPointSink(writer,
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
@@ -172,6 +163,10 @@ def main() -> None:
     trade_sink = InfluxDBTradeSink(EXCHANGE_NAME, point_sink)
     ticker_sink = InfluxDBTickerSink(EXCHANGE_NAME, point_sink)
     while True:
+        products = [product['id'] for product in client.get_products()
+                    if product['quote_currency'] in quote_currencies]
+        watermarks = initialize_watermarks(influx_client, "level1",
+                                           products)
         trade_handler = TradesMessageHandler(trade_sink, watermarks)
         ticker_handler = TickerHandler(ticker_sink)
         ws_client = RouterClient({trade_handler: ['match', 'last_match'],
@@ -186,8 +181,6 @@ def main() -> None:
             break
         finally:
             # catch up from last state
-            watermarks = initialize_watermarks(influx_client, "level1",
-                                               products)
             # out here so it doesn't wait on keyboard interrupt
             print('howdy')
             ws_client.close()  # this can block
