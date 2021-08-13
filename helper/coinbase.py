@@ -145,17 +145,23 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
         wait_for_authenticated_rate_limit()
         url = f'{self.url}/orders/client:{client_oid}'
         response = requests.get(url, auth=self.auth)
-        if response.status_code == 200:
+        status_code = response.status_code
+        category = status_code - (status_code % 100)
+        # assumes you're eventually going to get either a 200 or 400
+        if category == 200:
             return response.json()
-        else:
+        elif category == 400:
             return None
+        else:  # neanderthal retry
+            self._reset_session()
+            return self.get_order_by_client_oid(client_oid)
 
     def retryable_market_order(self, *args,
                                **kwargs) -> dict:
-        client_oid = kwargs.get('client_oid', str(uuid4()))
-        kwargs['client_oid'] = client_oid
         tries = 0
         while True:
+            client_oid = str(uuid4())
+            kwargs['client_oid'] = client_oid
             try:
                 return self.place_market_order(*args, **kwargs)
             except (requests.RequestException, InternalServerError) as e:
@@ -168,10 +174,10 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
 
     def retryable_limit_order(self, *args,
                               **kwargs) -> dict:
-        client_oid = kwargs.get('client_oid', str(uuid4()))
-        kwargs['client_oid'] = client_oid
         tries = 0
         while True:
+            client_oid = str(uuid4())
+            kwargs['client_oid'] = client_oid
             try:
                 return self.place_limit_order(*args, **kwargs)
             except (requests.RequestException, InternalServerError) as e:

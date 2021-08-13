@@ -10,7 +10,7 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 from helper.coinbase import get_usd_product_ids, get_server_time, \
     PublicClient
 from realtime_ingest.sink import RecordSink, InfluxDBTradeSink, \
-    InfluxDBTickerSink, BatchingSink
+    InfluxDBTickerSink, BatchingSink, InfluxDBPointSink
 from realtime_ingest.tasks import replay, create_all
 from realtime_ingest.watermarks import watermarks_at_time
 from settings import influx_db as influx_db_settings
@@ -104,7 +104,7 @@ class TickerHandler(MessageHandler):
 
 
 class TradesMessageHandler(MessageHandler):
-    def __init__(self, sink: BatchingSink,
+    def __init__(self, sink: RecordSink,
                  watermarks: t.Optional[dict]):
         self.sink = sink
         # catchup aggregates
@@ -129,7 +129,6 @@ class TradesMessageHandler(MessageHandler):
             self.replayed_missed_tasks = False
         self.catching_up[product] = needs_catch_up
         if needs_catch_up:
-            prev_capacity = self.sink.capacity
             self.sink.capacity = trade_id - watermark
             print(f'catching up {product} {watermark}->{trade_id}')
             gap = catchup(product, watermark, trade_id)
@@ -137,7 +136,6 @@ class TradesMessageHandler(MessageHandler):
                 self.checkpoint_start = min(self.checkpoint_start,
                                             item['time'])
                 self.sink.send(item)
-            self.sink.capacity = prev_capacity
             print(f'caught up {product}')
         self.sink.send(trade)
         self.watermarks[product] = trade_id
@@ -164,20 +162,16 @@ def main() -> None:
                org=influx_db_settings.INFLUX_ORG)
     watermarks = initialize_watermarks(influx_client, "level1", products)
     writer = influx_client.write_api(write_options=SYNCHRONOUS)
-    trade_sink = InfluxDBTradeSink(EXCHANGE_NAME,
-                                   writer,
+    point_sink = InfluxDBPointSink(writer,
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG,
                                    bucket="level1")
-    ticker_sink = InfluxDBTickerSink(EXCHANGE_NAME,
-                                     writer,
-                                     org_id=influx_db_settings.INFLUX_ORG_ID,
-                                     org=influx_db_settings.INFLUX_ORG,
-                                     bucket="level1")
+    point_sink = BatchingSink(point_sink, 32)
+    trade_sink = InfluxDBTradeSink(EXCHANGE_NAME, point_sink)
+    ticker_sink = InfluxDBTickerSink(EXCHANGE_NAME, point_sink)
     while True:
-        trade_handler = TradesMessageHandler(BatchingSink(trade_sink, 32),
-                                             watermarks)
-        ticker_handler = TickerHandler(BatchingSink(ticker_sink, 16))
+        trade_handler = TradesMessageHandler(trade_sink, watermarks)
+        ticker_handler = TickerHandler(ticker_sink)
         ws_client = RouterClient({trade_handler: ['match', 'last_match'],
                                   ticker_handler: ['ticker'], },
                                  channels=['matches', 'ticker'],

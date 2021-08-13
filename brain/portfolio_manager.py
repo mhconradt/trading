@@ -130,12 +130,6 @@ def adjust_spending_target(targets: pd.Series,
     return weights.fillna(0.).map(Decimal)
 
 
-def calculate_ratios(cash: pd.Series,
-                     positions: pd.Series) -> pd.Series:
-    ratios = positions.replace(0., 1.) / cash.replace(0., 1.)
-    return ratios.fillna(1.)
-
-
 class PortfolioManager:
     def __init__(self, client: AuthenticatedClient,
                  candles_src: CandlesIndicator,
@@ -613,9 +607,7 @@ class PortfolioManager:
         """
         Adjust stop losses on active positions.
         Move stop loss triggered positions to desired limit sell.
-
         """
-        self.compress_active_positions()
         next_generation: t.List[ActivePosition] = []
         for position in self.active_positions:
             market = position.market
@@ -630,13 +622,10 @@ class PortfolioManager:
                 continue
             increment = Decimal(market_info['base_increment'])
             sell_fraction = self.sell_weights.get(market, Decimal(0))
-            incremental_sell_size = compute_sell_size(position.size,
-                                                      sell_fraction,
-                                                      min_size,
-                                                      increment)
-            liquidate = self.stop_loss.trigger_stop_loss(self.prices[market],
-                                                         position.price)
-            sell_size = position.size if liquidate else incremental_sell_size
+            sell_size = compute_sell_size(position.size,
+                                          sell_fraction,
+                                          min_size,
+                                          increment)
             remainder = position.size - sell_size
             if sell_size:
                 if remainder:
@@ -774,7 +763,11 @@ class PortfolioManager:
         """
         next_generation: t.List[DesiredLimitSell] = []
         for sell in self.desired_limit_sells:
-            if not self.sell_weights.get(sell.market, 0.) > 0.:
+            market_info = self.market_info[sell.market]
+            backing_off = self.sell_weights.get(sell.market, 0.) <= 0.
+            size_too_small = sell.size < Decimal(market_info['base_min_size'])
+            if backing_off or size_too_small:
+                state_change = 'backed off' if backing_off else 'too small'
                 position = ActivePosition(
                     market=sell.market,
                     size=sell.size,
@@ -782,11 +775,10 @@ class PortfolioManager:
                     previous_state=sell,
                     fees=sell.cumulative_fees(),
                     start=self.tick_time,
-                    state_change='backed off'
+                    state_change=state_change
                 )
                 self.active_positions.append(position)
                 continue
-            market_info = self.market_info[sell.market]
             if market_info['trading_disabled']:
                 next_generation.append(sell)
                 continue
@@ -817,7 +809,7 @@ class PortfolioManager:
                         previous_state=sell,
                         fees=sell.cumulative_fees(),
                         start=self.tick_time,
-                        state_change='sell error'
+                        state_change=order.get('message'),
                     )
                     self.active_positions.append(position)
                 logger.debug(f"Error placing order {order} {sell}")
@@ -1047,6 +1039,7 @@ class PortfolioManager:
         self.queue_buys()
         self.check_desired_limit_buys()
         self.check_desired_market_buys()
+        self.compress_active_positions()
         self.check_active_positions()
         self.check_desired_market_sells()
         self.check_desired_limit_sells()

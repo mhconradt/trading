@@ -10,11 +10,11 @@ from influxdb_client.client.write_api import WriteApi
 
 class RecordSink(ABC):
     @abstractmethod
-    def send(self, record: dict, /) -> None:
+    def send(self, record: t.Any, /) -> None:
         ...
 
     @abstractmethod
-    def send_many(self, records: t.Iterable[dict], /) -> None:
+    def send_many(self, records: t.List[t.Any], /) -> None:
         ...
 
 
@@ -24,12 +24,12 @@ class BatchingSink(RecordSink):
         self.sink = sink
         self._batch = []
 
-    def send(self, record: dict, /) -> None:
+    def send(self, record: t.Any, /) -> None:
         self._batch.append(record)
         if len(self._batch) >= self.capacity:
             self._send_batch()
 
-    def send_many(self, records: t.Iterable[dict]) -> None:
+    def send_many(self, records: t.Iterable[t.Any]) -> None:
         for record in records:
             self.send(record)
 
@@ -51,9 +51,9 @@ class Printer(RecordSink):
 
 
 class InfluxDBTickerSink(RecordSink):
-    def __init__(self, exchange: str, writer: WriteApi, *args, **kwargs):
+    def __init__(self, exchange: str, point_sink: RecordSink):
         self.exchange = exchange
-        self.point_sink = InfluxDBPointSink(writer, *args, **kwargs)
+        self.point_sink = point_sink
 
     def send(self, ticker: dict, /) -> None:
         point = self.build_point(ticker)
@@ -61,8 +61,8 @@ class InfluxDBTickerSink(RecordSink):
 
     def send_many(self, tickers: t.Iterable[dict], /) -> None:
         points = []
-        for trade in tickers:
-            p = self.build_point(trade)
+        for ticker in tickers:
+            p = self.build_point(ticker)
             points.append(p)
         self.point_sink.send_many(points)
 
@@ -78,9 +78,9 @@ class InfluxDBTickerSink(RecordSink):
 
 
 class InfluxDBTradeSink(RecordSink):
-    def __init__(self, exchange: str, writer: WriteApi, *args, **kwargs):
+    def __init__(self, exchange: str, point_sink: RecordSink):
         self.exchange = exchange
-        self.point_sink = InfluxDBPointSink(writer, *args, **kwargs)
+        self.point_sink = point_sink
         self.product_timestamps = dict()
         self.product_anchors = dict()
 
