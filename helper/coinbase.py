@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 import typing as t
 from datetime import datetime
@@ -10,6 +11,8 @@ import requests
 from ratelimit import rate_limited, sleep_and_retry
 
 from exceptions import InternalServerError
+
+logger = logging.getLogger(__name__)
 
 
 @sleep_and_retry
@@ -146,14 +149,15 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
         url = f'{self.url}/orders/client:{client_oid}'
         response = requests.get(url, auth=self.auth)
         status_code = response.status_code
-        category = status_code - (status_code % 100)
         # assumes you're eventually going to get either a 200 or 400
-        if category == 200:
+        if status_code == 200:
             return response.json()
-        elif category == 400:
+        elif status_code == 404:
             return None
         else:  # neanderthal retry
+            time.sleep(1)
             self._reset_session()
+            logger.debug(f"Retrying status {status_code} for {client_oid}")
             return self.get_order_by_client_oid(client_oid)
 
     def retryable_market_order(self, *args,
