@@ -12,12 +12,13 @@ logger = logging.getLogger(__name__)
 
 class CandleSticks:
     def __init__(self, db: InfluxDBClient, exchange: str, periods: int,
-                 frequency: timedelta, bucket: str):
+                 frequency: timedelta, bucket: str, quote: str):
         self.bucket = bucket
         self.db = db
         self.frequency = frequency
         self.exchange = exchange
         self.periods = periods
+        self.quote = quote
 
     def compute(self) -> pd.DataFrame:
         _start = time.time()
@@ -26,7 +27,8 @@ class CandleSticks:
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
                       'start': start,
-                      'bucket': self.bucket}
+                      'bucket': self.bucket,
+                      'quote': self.quote}
         raw_df = query_api.query_data_frame("""
             import "date"
             
@@ -36,6 +38,7 @@ class CandleSticks:
             trades = from(bucket: bucket)
                 |> range(start: start)
                 |> filter(fn: (r) => r["_measurement"] == "matches")
+                |> filter(fn: (r) => r["quote"] == quote)
                 |> filter(fn: (r) => r["_field"] == "price" 
                                      or r["_field"] == "size")
                 |> filter(fn: (r) => r["exchange"] == exchange)                
@@ -97,7 +100,7 @@ def main():
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG)
     candles = CandleSticks(influx_client, 'coinbasepro', 30,
-                           timedelta(minutes=1), 'trades')
+                           timedelta(minutes=1), 'level1', 'USD')
     while True:
         start = time.time()
         values = candles.compute()

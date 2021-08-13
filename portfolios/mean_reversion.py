@@ -36,9 +36,11 @@ class MeanReversionBuy:
                  frequency: timedelta = timedelta(minutes=1)):
         self.threshold = 0.001
         self.periods = periods
-        self.ema = TripleEMA(db, periods, frequency)
+        self.ema = TripleEMA(db, periods, frequency,
+                             portfolio_settings.QUOTE)
         self.split_quote_volume = SplitQuoteVolume(db, 1, frequency,
-                                                   TRADE_BUCKET)
+                                                   TRADE_BUCKET,
+                                                   portfolio_settings.QUOTE)
 
     @property
     def periods_required(self) -> int:
@@ -67,9 +69,11 @@ class MeanReversionSell:
                  frequency: timedelta = timedelta(minutes=1)):
         self.threshold = 0.001
         self.periods = periods
-        self.ema = TripleEMA(db, periods, frequency)
+        self.ema = TripleEMA(db, periods, frequency,
+                             portfolio_settings.QUOTE)
         self.split_quote_volume = SplitQuoteVolume(db, 1, frequency,
-                                                   TRADE_BUCKET)
+                                                   TRADE_BUCKET,
+                                                   portfolio_settings.QUOTE)
 
     @property
     def periods_required(self) -> int:
@@ -110,12 +114,14 @@ def main() -> None:
                                        frequency=FREQUENCY)
     volume_indicator = TrailingVolume(periods=1)
     price_indicator = Ticker(periods=1)
-    bid_ask = BidAsk(client, period=timedelta(minutes=1), bucket=TICKER_BUCKET)
+    bid_ask = BidAsk(client, period=timedelta(minutes=1), bucket=TICKER_BUCKET,
+                     quote=portfolio_settings.QUOTE)
     candle_periods = max(buy_indicator.periods_required,
                          sell_indicator.periods_required,
                          volume_indicator.periods_required, )
     candles_src = CandleSticks(client, portfolio_settings.EXCHANGE,
-                               candle_periods, FREQUENCY, TRADE_BUCKET)
+                               candle_periods, FREQUENCY, TRADE_BUCKET,
+                               portfolio_settings.QUOTE)
     manager = PortfolioManager(coinbase, candles_src,
                                buy_indicator=buy_indicator,
                                sell_indicator=sell_indicator,
@@ -126,6 +132,7 @@ def main() -> None:
                                                  'CLV-USD', 'PAX-USD'},
                                stop_loss=stop_loss,
                                liquidate_on_shutdown=False,
+                               quote=portfolio_settings.QUOTE,
                                buy_order_type='limit', sell_order_type='limit',
                                buy_target_horizon=timedelta(minutes=5),
                                sell_target_horizon=timedelta(minutes=5),

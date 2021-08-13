@@ -140,14 +140,16 @@ class PortfolioManager:
                  bid_ask_indicator: BidAskIndicator,
                  cool_down: VolatilityCoolDown,
                  market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
-                 liquidate_on_shutdown: bool, buy_order_type: str = 'limit',
-                 sell_order_type: str = 'limit',
-                 buy_time_in_force: str = 'GTC',
-                 sell_time_in_force: str = 'GTC',
+                 liquidate_on_shutdown: bool, quote: str,
+                 buy_order_type: str = 'limit', sell_order_type: str = 'limit',
                  buy_target_horizon=timedelta(minutes=10),
                  sell_target_horizon=timedelta(minutes=5),
+                 buy_time_in_force: str = 'GTC',
+                 sell_time_in_force: str = 'GTC',
                  buy_age_limit=timedelta(minutes=1),
-                 sell_age_limit=timedelta(minutes=1), post_only: bool = False):
+                 sell_age_limit=timedelta(minutes=1),
+                 post_only: bool = False):
+        self.quote = quote
         self.buy_target_horizon = buy_target_horizon
         self.sell_target_horizon = sell_target_horizon
         self.initialized = False
@@ -160,8 +162,8 @@ class PortfolioManager:
         self.sell_indicator = sell_indicator
         self.bid_ask_indicator = bid_ask_indicator
         accounts = self.client.get_accounts()
-        self.usd_account_id = [account['id'] for account in accounts if
-                               account['currency'] == 'USD'][0]
+        self.quote_account_id = [account['id'] for account in accounts if
+                                 account['currency'] == self.quote][0]
         self.tracker = SyncCoinbaseOrderTracker(client)
         self.pop_limit = Decimal('0.3')
         self.pov_limit = Decimal('1')
@@ -959,16 +961,16 @@ class PortfolioManager:
         self.maker_fee = Decimal(fee_info['maker_fee_rate'])
 
     def set_portfolio_available_funds(self) -> None:
-        usd_account = self.client.get_account(self.usd_account_id)
-        self.portfolio_available_funds = Decimal(usd_account['available'])
+        quote_account = self.client.get_account(self.quote_account_id)
+        self.portfolio_available_funds = Decimal(quote_account['available'])
 
     def liquidate(self) -> None:
         for account in self.client.get_accounts():
-            if account['currency'] == 'USD':
+            if account['currency'] == self.quote:
                 continue
             if not Decimal(account['available']):
                 continue
-            market = f"{account['currency']}-USD"
+            market = f"{account['currency']}-{self.quote}"
             self.client.retryable_market_order(market,
                                                side='sell',
                                                size=account['available'])
@@ -990,9 +992,9 @@ class PortfolioManager:
     def initialize_active_positions(self) -> None:
         positions: t.List[ActivePosition] = []
         for account in self.client.get_accounts():
-            if account['currency'] == 'USD':
+            if account['currency'] == self.quote:
                 continue
-            market = f"{account['currency']}-USD"
+            market = f"{account['currency']}-{self.quote}"
             if market not in self.market_info:
                 continue
             balance = Decimal(account['balance'])

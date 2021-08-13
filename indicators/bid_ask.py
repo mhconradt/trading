@@ -9,10 +9,12 @@ logger = logging.getLogger(__name__)
 
 
 class BidAsk:
-    def __init__(self, db: InfluxDBClient, period: timedelta, bucket: str):
+    def __init__(self, db: InfluxDBClient, period: timedelta, bucket: str,
+                 quote: str):
         self.bucket = bucket
         self.db = db
         self.period = period
+        self.quote = quote
 
     def compute(self) -> pd.DataFrame:
         """
@@ -20,11 +22,13 @@ class BidAsk:
         """
         _start = time.time()
         query_api = self.db.query_api()
-        params = {'start': -self.period, 'bucket': self.bucket}
+        params = {'start': -self.period, 'bucket': self.bucket,
+                  'quote': self.quote}
         query = """
             from(bucket: bucket)
                 |> range(start: start)
                 |> filter(fn: (r) => r["_measurement"] == "tickers")
+                |> filter(fn: (r) => r["quote"] == quote)
                 |> last()
                 |> pivot(rowKey: ["market"], 
                          columnKey: ["_field"], 
@@ -49,7 +53,7 @@ def main():
                              influx_db_settings.INFLUX_TOKEN,
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG)
-    bid_ask = BidAsk(_influx, timedelta(minutes=1), 'tickers')
+    bid_ask = BidAsk(_influx, timedelta(minutes=1), 'level1', 'USD')
     while True:
         try:
             _start = time.time()

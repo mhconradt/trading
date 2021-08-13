@@ -97,8 +97,10 @@ def main() -> None:
                          price_indicator.periods_required,
                          volume_indicator.periods_required, )
     candles_src = CandleSticks(client, portfolio_settings.EXCHANGE,
-                               candle_periods, timedelta(minutes=1), 'trades')
-    bid_ask = BidAsk(client, period=timedelta(minutes=1), bucket='tickers')
+                               candle_periods, timedelta(minutes=1), 'level1',
+                               portfolio_settings.QUOTE)
+    bid_ask = BidAsk(client, period=timedelta(minutes=1), bucket='level1',
+                     quote=portfolio_settings.QUOTE)
     manager = PortfolioManager(coinbase, candles_src,
                                buy_indicator=buy_indicator,
                                sell_indicator=sell_indicator,
@@ -107,6 +109,7 @@ def main() -> None:
                                bid_ask_indicator=bid_ask, cool_down=cool_down,
                                market_blacklist={'USDT-USD', 'DAI-USD'},
                                stop_loss=stop_loss, liquidate_on_shutdown=True,
+                               quote=portfolio_settings.QUOTE,
                                buy_order_type='market',
                                sell_order_type='market')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())

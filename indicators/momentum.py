@@ -47,7 +47,8 @@ def main():
 
     mom = Momentum(periods=15)
     candles_src = CandleSticks(influx_client, 'coinbasepro', periods=16,
-                               frequency=timedelta(minutes=1), bucket='trades')
+                               frequency=timedelta(minutes=1), bucket='level1',
+                               quote='USD')
     while True:
         _start = time.time()
         print(mom.compute(candles_src.compute()).iloc[-1].describe())

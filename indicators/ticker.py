@@ -31,7 +31,7 @@ def main():
                              org=influx_db_settings.INFLUX_ORG)
     ticker = Ticker(1)
     candles = CandleSticks(_influx, 'coinbasepro', 1, timedelta(minutes=1),
-                           'trades')
+                           'level1', 'USD')
     while True:
         _start = time.time()
         values = ticker.compute(candles.compute())

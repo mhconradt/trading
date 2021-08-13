@@ -8,27 +8,26 @@ from exceptions import StaleDataException
 
 class CandleSticks:
     def __init__(self, db: InfluxDBClient, exchange: str, periods: int,
-                 frequency: timedelta, offset: int):
+                 frequency: timedelta, quote: str):
         self.db = db
         self.frequency = frequency
         self.exchange = exchange
         self.periods = periods
-        self.offset = offset
+        self.quote = quote
 
     def compute(self) -> pd.DataFrame:
         query_api = self.db.query_api()
         lag_toleration = timedelta(seconds=15)
-        start = -(
-                    self.periods + 1 + self.offset) * self.frequency + lag_toleration
-        stop = self.frequency * -self.offset
+        start = -(self.periods + 1) * self.frequency + lag_toleration
         parameters = {'exchange': self.exchange,
                       'freq': self.frequency,
                       'start': start,
-                      'stop': stop}
+                      'quote': self.quote}
         df = query_api.query_data_frame("""
             from(bucket: "candles")
-            |> range(start: start, stop: stop)
+            |> range(start: start)
             |> filter(fn: (r) => r["_measurement"] == "candles_${string(v: freq)}")
+            |> filter(fn: (r) => r["quote"] == quote)
             |> filter(fn: (r) => r["exchange"] == exchange)
             |> pivot(rowKey: ["market", "_time"], 
                      columnKey: ["_field"], 
@@ -38,7 +37,7 @@ class CandleSticks:
                                         params=parameters)
         if not len(df):
             raise StaleDataException(
-                f"No candles between {start} and {stop}"
+                f"No candles after {start}"
             )
         if isinstance(df, list):
             df = pd.concat(df)
@@ -50,7 +49,8 @@ class CandleSticks:
 
 def main(influx: InfluxDBClient):
     import time
-    candles = CandleSticks(influx, 'coinbasepro', 300, timedelta(minutes=1), 0)
+    candles = CandleSticks(influx, 'coinbasepro', 300, timedelta(minutes=1),
+                           'USD')
     total = 0.
     measurements = 7
     for i in range(measurements):

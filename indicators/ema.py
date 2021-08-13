@@ -9,28 +9,32 @@ logger = logging.getLogger(__name__)
 
 
 class TripleEMA:
-    def __init__(self, db: InfluxDBClient, periods: int, frequency: timedelta):
+    def __init__(self, db: InfluxDBClient, periods: int, frequency: timedelta,
+                 quote: str):
         self.db = db
         self.periods = periods
         self.frequency = frequency
+        self.quote = quote
 
     def compute(self) -> pd.Series:
         _start = time.time()
+        calculation_periods = 3 * self.periods - 2
+        start = -calculation_periods * self.frequency
+        params = {'periods': self.periods, 'start': start,
+                  'frequency': self.frequency,
+                  'quote': self.quote}
         query = """
             measurement = "candles_" + string(v: frequency)
         
             from(bucket: "candles")
               |> range(start: start)
               |> filter(fn: (r) => r["_measurement"] == measurement)
+              |> filter(fn: (r) => r["quote"] == quote)
               |> filter(fn: (r) => r["_field"] == "close")
               |> tail(n: 3 * periods - 2)
               |> tripleEMA(n: periods)
               |> yield(name: "ema")
         """
-        calculation_periods = 3 * self.periods - 2
-        start = -calculation_periods * self.frequency
-        params = {'periods': self.periods, 'start': start,
-                  'frequency': self.frequency}
         index = ['market', '_time']
         query_api = self.db.query_api()
         raw_df = query_api.query_data_frame(query, params=params,
@@ -54,9 +58,9 @@ def main():
                              influx_db_settings.INFLUX_TOKEN,
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG)
-    ema = TripleEMA(_influx, 26, timedelta(minutes=1))
+    ema = TripleEMA(_influx, 26, timedelta(minutes=1), 'USD')
     candles = CandleSticks(_influx, 'coinbasepro', 5, timedelta(minutes=1),
-                           'trades')
+                           'level1', 'USD')
     while True:
         try:
             _start = time.time()

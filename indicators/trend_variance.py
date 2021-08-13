@@ -54,7 +54,7 @@ def main():
     indicator = TrendVariance(periods=5)
     alt_indicator = AltTrendVariance(periods=5)
     candles = CandleSticks(influx, 'coinbasepro', 5, timedelta(minutes=1),
-                           'trades')
+                           'level1', 'USD')
     while True:
         _start = time.time()
         candle_data = candles.compute()

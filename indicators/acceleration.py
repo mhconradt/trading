@@ -50,7 +50,7 @@ def main():
                             org=influx_db_settings.INFLUX_ORG)
     indicator = TrendAcceleration(a=3, b=2)  # fib(4), fib(3)
     candles = CandleSticks(influx, 'coinbasepro', 6, timedelta(minutes=1),
-                           'trades')
+                           'level1', 'USD')
     while True:
         _start = time.time()
         print(indicator.compute(candles.compute()))
