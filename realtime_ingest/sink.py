@@ -68,10 +68,13 @@ class InfluxDBTickerSink(RecordSink):
 
     def build_point(self, ticker: dict) -> Point:
         product = ticker['product_id']
+        base, quote = product.split("-")
         timestamp = dateutil.parser.parse(ticker['time'])
         return Point("tickers") \
             .tag('exchange', self.exchange) \
             .tag('market', product) \
+            .tag('base', base) \
+            .tag('quote', quote) \
             .time(timestamp) \
             .field('bid', Decimal(ticker['best_bid'])) \
             .field('ask', Decimal(ticker['best_ask']))
@@ -90,6 +93,7 @@ class InfluxDBTradeSink(RecordSink):
 
     def build_point(self, trade: dict) -> Point:
         product = trade['product_id']
+        base, quote = product.split("-")
         timestamp = dateutil.parser.parse(trade['time'])
         trade_id = trade['trade_id']
         if self.product_timestamps.get(product) != timestamp:
@@ -105,6 +109,8 @@ class InfluxDBTradeSink(RecordSink):
             .tag('exchange', self.exchange) \
             .tag('market', trade['product_id']) \
             .tag('side', trade['side']) \
+            .tag('base', base) \
+            .tag('quote', quote) \
             .time(timestamp + timedelta(microseconds=salt)) \
             .field('price', Decimal(trade['price'])) \
             .field('size', Decimal(trade['size'])) \
