@@ -7,8 +7,7 @@ import cbpro
 from influxdb_client import InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
 
-from helper.coinbase import get_usd_product_ids, get_server_time, \
-    PublicClient
+from helper.coinbase import PublicClient, get_server_time
 from realtime_ingest.sink import RecordSink, InfluxDBTradeSink, \
     InfluxDBTickerSink, BatchingSink, InfluxDBPointSink
 from realtime_ingest.tasks import replay, create_all
@@ -152,7 +151,10 @@ class TradesMessageHandler(MessageHandler):
 
 
 def main() -> None:
-    products = get_usd_product_ids()
+    quote_currencies = {'USD', 'USDT', 'USDC'}
+    client = PublicClient()
+    products = [product['id'] for product in client.get_products()
+                if product['quote_currency'] in quote_currencies]
     influx_client = InfluxDBClient(influx_db_settings.INFLUX_URL,
                                    influx_db_settings.INFLUX_TOKEN,
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
@@ -166,7 +168,7 @@ def main() -> None:
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG,
                                    bucket="level1")
-    point_sink = BatchingSink(point_sink, 32)
+    point_sink = BatchingSink(point_sink, 64)
     trade_sink = InfluxDBTradeSink(EXCHANGE_NAME, point_sink)
     ticker_sink = InfluxDBTickerSink(EXCHANGE_NAME, point_sink)
     while True:
