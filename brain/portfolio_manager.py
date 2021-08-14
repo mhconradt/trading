@@ -396,9 +396,9 @@ class PortfolioManager:
                 continue
             max_funds = Decimal(info['max_market_funds'])
             funds = min(funds, max_funds)
-            order = self.client.retryable_market_order(market, side='buy',
-                                                       funds=str(funds),
-                                                       stp='cn')
+            order = self.client.place_market_order(market, side='buy',
+                                                   funds=str(funds),
+                                                   stp='cn')
             self.cool_down.bought(market)
             if 'id' not in order:
                 logger.warning(order)
@@ -450,12 +450,12 @@ class PortfolioManager:
             size = min(size, max_size)
             post_only = self.post_only or info['post_only']
             tif = 'GTC' if post_only else self.buy_time_in_force
-            order = self.client.retryable_limit_order(market, side='buy',
-                                                      price=str(price),
-                                                      size=str(size),
-                                                      time_in_force=tif,
-                                                      post_only=post_only,
-                                                      stp='cn')
+            order = self.client.place_limit_order(market, side='buy',
+                                                  price=str(price),
+                                                  size=str(size),
+                                                  time_in_force=tif,
+                                                  post_only=post_only,
+                                                  stp='cn')
             self.cool_down.bought(market)
             if 'id' not in order:
                 logger.warning(order)
@@ -682,10 +682,10 @@ class PortfolioManager:
                 continue
             exp = Decimal(self.market_info[sell.market]['base_increment'])
             size = sell.size.quantize(exp, rounding='ROUND_DOWN')
-            order = self.client.retryable_market_order(sell.market,
-                                                       side='sell',
-                                                       size=str(size),
-                                                       stp='dc')
+            order = self.client.place_market_order(sell.market,
+                                                   side='sell',
+                                                   size=str(size),
+                                                   stp='dc')
             if 'id' not in order:
                 logger.warning(f"Error placing order {order} {sell}")
                 continue
@@ -798,7 +798,7 @@ class PortfolioManager:
                           time_in_force=tif,
                           post_only=post_only,
                           stp='co')
-            order = self.client.retryable_limit_order(**kwargs)
+            order = self.client.place_limit_order(**kwargs)
             if 'id' not in order:
                 # this means the market moved up
                 if order.get('message') == 'Post only mode':
@@ -945,12 +945,6 @@ class PortfolioManager:
         asks = bid_ask['ask']
         self.asks = asks.map(Decimal).where(asks.notna(), pd.NA)
 
-    def calculate_cash_balances(self, qv: pd.Series) -> pd.Series:
-        qv_fractions = qv / qv.sum()
-        funds = float(self.portfolio_available_funds)
-        cash_balances = (qv_fractions * funds).fillna(0.)
-        return cash_balances
-
     def set_market_info(self) -> None:
         self.market_info = {product['id']: product for product in
                             self.client.get_products()}
@@ -971,9 +965,9 @@ class PortfolioManager:
             if not Decimal(account['available']):
                 continue
             market = f"{account['currency']}-{self.quote}"
-            self.client.retryable_market_order(market,
-                                               side='sell',
-                                               size=account['available'])
+            self.client.place_market_order(market,
+                                           side='sell',
+                                           size=account['available'])
 
     def shutdown(self) -> None:
         logger.info(f"Shutting down...")

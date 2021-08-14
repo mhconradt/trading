@@ -62,9 +62,6 @@ class PublicClient(cbpro.PublicClient):
                     continue
                 elif r.status_code >= 500:
                     raise InternalServerError()
-                elif r.status_code == 429:
-                    time.sleep(1)
-                    continue
                 return r.json()
             except requests.RequestException as e:
                 self._reset_session()
