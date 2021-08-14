@@ -3,7 +3,7 @@ import logging
 import random
 import time
 import typing as t
-from collections import defaultdict, deque
+from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -207,7 +207,7 @@ class PortfolioManager:
         self.maker_fee: t.Optional[Decimal] = None
 
         # STATES
-        self.desired_limit_buys: deque[DesiredLimitBuy] = deque()
+        self.desired_limit_buys: t.List[DesiredLimitBuy] = []
         self.desired_market_buys: t.List[DesiredMarketBuy] = []
         self.pending_limit_buys: t.List[PendingLimitBuy] = []
         self.pending_market_buys: t.List[PendingMarketBuy] = []
@@ -358,7 +358,7 @@ class PortfolioManager:
                                       previous_state=previous_state,
                                       state_change=state_change)
                 logger.debug(buy)
-                self.desired_limit_buys.appendleft(buy)
+                self.desired_limit_buys.append(buy)
             elif self.buy_order_type == 'market':
                 buy = DesiredMarketBuy(funds=funds, market=market,
                                        previous_state=previous_state,
@@ -424,7 +424,11 @@ class PortfolioManager:
         Only place orders for markets that are online.
         Only place orders that are within exchange limits for market.
         """
+        next_generation: t.List[DesiredLimitBuy] = []
         for buy in self.desired_limit_buys:
+            if not self.buy_weights.get(buy.market):
+                self.counter.decrement()
+                continue
             market = buy.market
             info = self.market_info[market]
             if info['status'] != 'online' or info['trading_disabled']:
@@ -458,7 +462,8 @@ class PortfolioManager:
                                                   stp='cn')
             self.cool_down.bought(market)
             if 'id' not in order:
-                logger.warning(order)
+                next_generation.append(buy)
+                logger.warning(f"Error placing buy order {order}")
                 self.counter.decrement()
                 continue  # This means there was a problem with the order
             created_at = dateutil.parser.parse(order['created_at'])
@@ -472,7 +477,7 @@ class PortfolioManager:
             logger.debug(pending)
             self.pending_limit_buys.append(pending)
         # RESET DESIRED BUYS
-        self.desired_limit_buys = deque()
+        self.desired_limit_buys = next_generation
 
     def check_pending_limit_buys(self) -> None:
         """
