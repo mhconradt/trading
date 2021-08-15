@@ -165,7 +165,7 @@ class PortfolioManager:
         self.quote_account_id = [account['id'] for account in accounts if
                                  account['currency'] == self.quote][0]
         self.tracker = SyncCoinbaseOrderTracker(client)
-        self.pop_limit = Decimal('0.3')
+        self.pop_limit = Decimal('0.25')
         self.pov_limit = Decimal('1')
 
         self.counter = PositionCounter()

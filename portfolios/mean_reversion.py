@@ -23,7 +23,7 @@ DEVIATION_THRESHOLD = 0.001
 
 MIN_SELL_FRACTION = 2 / 3
 
-MIN_BUY_FRACTION = 0.
+MIN_BUY_FRACTION = 0.  # I don't particularly care here
 
 TRADE_BUCKET = 'level1'
 
