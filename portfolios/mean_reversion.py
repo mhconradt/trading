@@ -17,6 +17,14 @@ from indicators.sliding_candles import CandleSticks
 from settings import influx_db as influx_db_settings, \
     coinbase as coinbase_settings, portfolio as portfolio_settings
 
+# STRATEGY PARAMETERS
+
+DEVIATION_THRESHOLD = 0.001
+
+MIN_SELL_FRACTION = 2 / 3
+
+MIN_BUY_FRACTION = 0.
+
 TRADE_BUCKET = 'level1'
 
 TICKER_BUCKET = 'level1'
@@ -58,7 +66,7 @@ class MeanReversionBuy:
         below = deviation > self.threshold
         markets = below[below].index.intersection(quote_volume.index)
         adjustment = np.log(deviation[markets] / self.threshold)
-        hold_fraction = 1. - ape_index[markets]
+        hold_fraction = 1. - np.maximum(MIN_BUY_FRACTION, ape_index[markets])
         hold_fraction = hold_fraction ** adjustment
         buy_fraction = 1. - hold_fraction
         return buy_fraction * volume_fraction[markets]
@@ -67,7 +75,7 @@ class MeanReversionBuy:
 class MeanReversionSell:
     def __init__(self, db: InfluxDBClient, periods: int = 26,
                  frequency: timedelta = timedelta(minutes=1)):
-        self.threshold = 0.001
+        self.threshold = DEVIATION_THRESHOLD
         self.periods = periods
         self.ema = TripleEMA(db, periods, frequency,
                              portfolio_settings.QUOTE)
@@ -89,7 +97,8 @@ class MeanReversionSell:
         above = deviations > self.threshold
         sell_markets = above[above].index.intersection(ape_index.index)
         # sell more quickly if it's quite apish
-        hold_fraction = 1. - np.maximum(0.5, ape_index[sell_markets])
+        hold_fraction = 1. - np.maximum(MIN_SELL_FRACTION,
+                                        ape_index[sell_markets])
         # always >= 1.0
         acceleration = np.log(deviations[sell_markets] / self.threshold)
         # increase the rate of selling with larger deviations

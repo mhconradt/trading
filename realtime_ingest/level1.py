@@ -159,7 +159,7 @@ def main() -> None:
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG,
                                    bucket="level1")
-    point_sink = BatchingSink(point_sink, 64)
+    point_sink = BatchingSink(point_sink, 32)
     trade_sink = InfluxDBTradeSink(EXCHANGE_NAME, point_sink)
     ticker_sink = InfluxDBTickerSink(EXCHANGE_NAME, point_sink)
     while True:
