@@ -464,7 +464,6 @@ class PortfolioManager:
             if 'id' not in order:
                 next_generation.append(buy)
                 logger.warning(f"Error placing buy order {order}")
-                self.counter.decrement()
                 continue  # This means there was a problem with the order
             created_at = dateutil.parser.parse(order['created_at'])
             order_id = order['id']
