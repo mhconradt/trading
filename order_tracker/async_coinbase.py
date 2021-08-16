@@ -8,7 +8,8 @@ from threading import Lock
 import cbpro
 import dateutil.parser
 
-from order_tracker.order_tracker import OrderTracker
+from helper.coinbase import get_server_time
+from order_tracker import OrderTracker
 
 
 # Simulate the Coinbase API.
@@ -110,16 +111,16 @@ class OrderTrackerClient(cbpro.WebsocketClient):
                          api_secret=api_secret)
         self._lock = Lock()
         self._orders: t.Dict[str, LimitOrderState] = {}
-        self._timestamp = ''
+        self._timestamp: datetime = get_server_time()
 
     def forget(self, order_id: str) -> None:
         with self._lock:
             if order_id in self._orders:
                 self._orders.pop(order_id)
 
-    def snapshot(self) -> t.Tuple[str, dict]:
+    def snapshot(self) -> t.Tuple[datetime, dict]:
         with self._lock:
-            # note that this makes a copy
+            # note with care that this makes a copy
             snapshot = {s.id: s.as_coinbase() for s in self._orders.values()}
             return self._timestamp, snapshot
 
@@ -127,30 +128,29 @@ class OrderTrackerClient(cbpro.WebsocketClient):
         msg_type = msg['type']
         if msg_type == 'subscriptions':
             return None
-        # initializes the timestamp
-        if msg_type == 'heartbeat':
-            if not self._timestamp:
-                with self._lock:
-                    self._timestamp = max(self._timestamp, msg['time'])
-            return None
-        order_id = self.get_order_id(msg)
-        prev_state = self._orders.get(order_id)
-        if msg_type == 'received':
-            state = LimitOrderState.from_received(msg)
-        elif msg_type == 'open' and prev_state:
-            state = prev_state.open(msg)
-        elif msg_type == 'match' and prev_state:
-            state = prev_state.match(msg)
-        elif msg_type == 'change' and prev_state:
-            state = prev_state.change(msg)
-        elif msg_type == 'done' and prev_state:
-            state = prev_state.done(msg)
-        else:
-            state = prev_state
         with self._lock:
+            timestamp = dateutil.parser.parse(msg['time'])
+            if msg_type == 'heartbeat':
+                self._timestamp = max(self._timestamp, timestamp)
+                return None
+            # beyond here everything must be an order update message
+            order_id = self.get_order_id(msg)
+            prev_state = self._orders.get(order_id)
+            if msg_type == 'received':
+                state = LimitOrderState.from_received(msg)
+            elif msg_type == 'open' and prev_state:
+                state = prev_state.open(msg)
+            elif msg_type == 'match' and prev_state:
+                state = prev_state.match(msg)
+            elif msg_type == 'change' and prev_state:
+                state = prev_state.change(msg)
+            elif msg_type == 'done' and prev_state:
+                state = prev_state.done(msg)
+            else:
+                state = prev_state
             if state:
                 self._orders[order_id] = state
-            self._timestamp = max(self._timestamp, msg['time'])
+            self._timestamp = max(self._timestamp, timestamp)
 
     def get_order_id(self, msg: dict) -> str:
         if 'order_id' in msg:
@@ -177,7 +177,6 @@ class AsyncCoinbaseTracker(OrderTracker):
         self.watchlist.add(order_id)
 
     def barrier_snapshot(self) -> t.Tuple[datetime, dict]:
-        # so right now there's no way
         if self._client.stop:
             raise ValueError()
         timestamp, snapshot = self._client.snapshot()
@@ -186,7 +185,7 @@ class AsyncCoinbaseTracker(OrderTracker):
                 if order_id not in self.watchlist:
                     self._client.forget(order_id)
                 snapshot.pop(order_id)
-        return dateutil.parser.parse(timestamp), snapshot
+        return timestamp, snapshot
 
     def snapshot(self) -> dict:
         _, snapshot = self.barrier_snapshot()
@@ -210,11 +209,11 @@ def main():
                                    api_passphrase=coinbase_settings.PASSPHRASE,
                                    ignore_untracked=False)
     while True:
-        time.sleep(15)
         timestamp, snapshot = tracker.barrier_snapshot()
         print(sum(
             map(lambda o: Decimal(o['executed_value']), snapshot.values())))
         print(timestamp)
+        time.sleep(5)
 
 
 __all__ = ['AsyncCoinbaseTracker']
