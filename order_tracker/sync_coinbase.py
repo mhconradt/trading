@@ -5,7 +5,7 @@ from datetime import datetime
 from cbpro import AuthenticatedClient
 
 from helper.coinbase import get_server_time
-from order_tracker.order_tracker import OrderTracker
+from order_tracker.base import OrderTracker
 
 logger = logging.getLogger(__name__)
 
@@ -42,3 +42,6 @@ class SyncCoinbaseTracker(OrderTracker):
         if order_id in self.watchlist:
             logger.debug(f"Forgetting {order_id}")
             self.watchlist.remove(order_id)
+
+    def stop(self) -> None:
+        pass

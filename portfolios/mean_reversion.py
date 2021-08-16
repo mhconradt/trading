@@ -14,7 +14,7 @@ from helper.coinbase import AuthenticatedClient
 from indicators import TrailingVolume, SplitQuoteVolume, TripleEMA, BidAsk, \
     Ticker
 from indicators.sliding_candles import CandleSticks
-from order_tracker import AsyncCoinbaseTracker
+from order_tracker.async_coinbase import AsyncCoinbaseTracker
 from settings import influx_db as influx_db_settings, \
     coinbase as cb_settings, portfolio as portfolio_settings
 
@@ -121,7 +121,7 @@ def main() -> None:
                                    api_key=cb_settings.API_KEY,
                                    api_secret=cb_settings.SECRET,
                                    api_passphrase=cb_settings.PASSPHRASE,
-                                   ignore_untracked=True)
+                                   ignore_untracked=False)
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
     cool_down = VolatilityCoolDown(buy_period=timedelta(minutes=0))

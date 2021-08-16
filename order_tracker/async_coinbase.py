@@ -1,3 +1,4 @@
+import logging
 import time
 import typing as t
 from dataclasses import dataclass
@@ -9,7 +10,9 @@ import cbpro
 import dateutil.parser
 
 from helper.coinbase import get_server_time
-from order_tracker import OrderTracker
+from order_tracker.base import OrderTracker
+
+logger = logging.getLogger(__name__)
 
 
 # Simulate the Coinbase API.
@@ -103,8 +106,11 @@ class OrderTrackerClient(cbpro.WebsocketClient):
     def __init__(self, products: t.List[str], api_passphrase: str,
                  api_secret: str,
                  api_key: str):
-        super().__init__(products=products,
-                         channels=['user', 'heartbeat'],
+        # only subscribe to heartbeat for one channel
+        channels = [{'name': 'user', 'product_ids': products},
+                    {'name': 'heartbeat', 'product_ids': products[:1]}]
+        super().__init__(products=[],
+                         channels=channels,
                          auth=True,
                          api_key=api_key,
                          api_passphrase=api_passphrase,
@@ -189,12 +195,16 @@ class AsyncCoinbaseTracker(OrderTracker):
 
     def snapshot(self) -> dict:
         _, snapshot = self.barrier_snapshot()
+        logger.debug(f"Snapshot: {snapshot}")
         return snapshot
 
     def forget(self, order_id: str) -> None:
         if order_id in self.watchlist:
             self.watchlist.remove(order_id)
         self._client.forget(order_id)
+
+    def stop(self) -> None:
+        self._client.stop = True
 
 
 def main():

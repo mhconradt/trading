@@ -19,3 +19,7 @@ class OrderTracker(ABC):
     @abstractmethod
     def forget(self, order_id: str) -> None:
         ...
+
+    @abstractmethod
+    def stop(self) -> None:
+        pass

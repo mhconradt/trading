@@ -166,7 +166,7 @@ class PortfolioManager:
         self.quote_account_id = [account['id'] for account in accounts if
                                  account['currency'] == self.quote][0]
         self.tracker = order_tracker
-        self.pop_limit = Decimal('0.25')
+        self.pop_limit = Decimal('0.33')
         self.pov_limit = Decimal('1')
 
         self.counter = PositionCounter()
@@ -980,6 +980,7 @@ class PortfolioManager:
         if self.liquidate_on_shutdown:
             self.liquidate()
         self.stop = True
+        self.tracker.stop()
 
     def initialize(self) -> None:
         n = 15
