@@ -344,6 +344,8 @@ class PortfolioManager:
         weights = self.limit_weights(self.buy_weights, spending_limit)
         decimal_weights = weights.fillna(0.).map(Decimal)
         for market, weight in decimal_weights.iteritems():
+            if market not in self.market_info:
+                continue
             assert isinstance(market, str)
             self.counter.increment()
             previous_state = RootState(market=market,
@@ -915,8 +917,6 @@ class PortfolioManager:
             self.counter.decrement()
 
     def set_tick_variables(self) -> None:
-        self.set_market_info()
-        self.set_fee()
         self.set_portfolio_available_funds()
         candles = self.candles_src.compute()
         volume = self.volume_indicator.compute(candles)
@@ -1013,6 +1013,8 @@ class PortfolioManager:
 
     def run(self) -> t.NoReturn:
         last_tick = get_server_time()
+        self.set_market_info()
+        self.set_fee()
         while not self.stop:
             iteration_start = time.time()
             self.set_tick_variables()
