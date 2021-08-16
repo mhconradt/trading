@@ -11,8 +11,12 @@ import dateutil.parser
 from brain.order_tracker import OrderTracker
 
 
+# Simulate the Coinbase API.
+# NOTE: Not tested for use with market orders.
+
+
 @dataclass
-class OrderState:
+class LimitOrderState:
     id: str
     status: str
     size: Decimal
@@ -34,6 +38,65 @@ class OrderState:
             'fill_fees': str(self.fill_fees),
         }
 
+    @staticmethod
+    def from_received(msg: dict) -> "LimitOrderState":
+        order_id = msg['order_id']
+        state = LimitOrderState(id=order_id, status='pending',
+                                size=Decimal(msg['size']),
+                                price=Decimal(msg['price']))
+        return state
+
+    def done(self, msg: dict) -> "LimitOrderState":
+        order_id = msg['order_id']
+        done_reason = msg['reason']
+        state = LimitOrderState(id=order_id,
+                                status='done',
+                                done_reason=done_reason,
+                                size=self.size,
+                                price=self.price,
+                                executed_value=self.executed_value,
+                                filled_size=self.filled_size,
+                                fill_fees=self.fill_fees)
+        return state
+
+    def change(self, msg: dict) -> "LimitOrderState":
+        order_id = msg['order_id']
+        state = LimitOrderState(id=order_id,
+                                status=self.status,
+                                size=Decimal(msg['new_size']),
+                                price=self.price,
+                                executed_value=self.executed_value,
+                                filled_size=self.filled_size,
+                                fill_fees=self.fill_fees,
+                                )
+        return state
+
+    def match(self, msg: dict) -> "LimitOrderState":
+        order_id = self.id
+        executed_value_delta = Decimal(msg['size']) * Decimal(msg['price'])
+        filled_size_delta = Decimal(msg['size'])
+        executed_value = self.executed_value + executed_value_delta
+        filled_size = self.filled_size + filled_size_delta
+        fee_rate = Decimal(msg.get('maker_fee_rate',
+                                   msg.get('taker_fee_rate')))
+        fee_delta = executed_value_delta * fee_rate
+        fill_fees = self.fill_fees + fee_delta
+        state = LimitOrderState(id=order_id,
+                                status=self.status,
+                                size=self.size,
+                                price=self.price,
+                                executed_value=executed_value,
+                                filled_size=filled_size,
+                                fill_fees=fill_fees)
+        return state
+
+    def open(self, _msg: dict) -> "LimitOrderState":
+        state = LimitOrderState(id=self.id,
+                                status='open',
+                                size=self.size,
+                                price=self.price)
+        return state
+
 
 class OrderTrackerClient(cbpro.WebsocketClient):
     def __init__(self, products: t.List[str], api_passphrase: str,
@@ -46,7 +109,7 @@ class OrderTrackerClient(cbpro.WebsocketClient):
                          api_passphrase=api_passphrase,
                          api_secret=api_secret)
         self._lock = Lock()
-        self._orders = {}
+        self._orders: t.Dict[str, LimitOrderState] = {}
         self._timestamp = ''
 
     def forget(self, order_id: str) -> None:
@@ -61,93 +124,68 @@ class OrderTrackerClient(cbpro.WebsocketClient):
             return self._timestamp, snapshot
 
     def on_message(self, msg: dict) -> None:
-        if msg['type'] == 'heartbeat' or msg['type'] == 'subscriptions':
+        msg_type = msg['type']
+        if msg_type == 'subscriptions':
             return None
+        # initializes the timestamp
+        if msg_type == 'heartbeat':
+            if not self._timestamp:
+                with self._lock:
+                    self._timestamp = max(self._timestamp, msg['time'])
+            return None
+        order_id = self.get_order_id(msg)
+        prev_state = self._orders.get(order_id)
+        if msg_type == 'received':
+            state = LimitOrderState.from_received(msg)
+        elif msg_type == 'open' and prev_state:
+            state = prev_state.open(msg)
+        elif msg_type == 'match' and prev_state:
+            state = prev_state.match(msg)
+        elif msg_type == 'change' and prev_state:
+            state = prev_state.change(msg)
+        elif msg_type == 'done' and prev_state:
+            state = prev_state.done(msg)
+        else:
+            state = prev_state
+        with self._lock:
+            if state:
+                self._orders[order_id] = state
+            self._timestamp = max(self._timestamp, msg['time'])
+
+    def get_order_id(self, msg: dict) -> str:
         if 'order_id' in msg:
             order_id = msg['order_id']
         else:
             maker, taker = msg['maker_order_id'], msg['taker_order_id']
             order_id = maker if maker in self._orders else taker
-        prev_state = self._orders.get(order_id)
-        if msg['type'] == 'received':
-            state = OrderState(id=order_id, status='pending',
-                               size=Decimal(msg['size']),
-                               price=Decimal(msg['price']))
-            with self._lock:
-                self._orders[order_id] = state
-                self._timestamp = max(self._timestamp, msg['time'])
-        elif msg['type'] == 'open' and order_id in self._orders:
-            state = OrderState(id=prev_state.id,
-                               status='open',
-                               size=prev_state.size,
-                               price=prev_state.price)
-            with self._lock:
-                self._orders[order_id] = state
-                self._timestamp = max(self._timestamp, msg['time'])
-        elif msg['type'] == 'match' and order_id in self._orders:
-            executed_value_delta = Decimal(msg['size']) * Decimal(msg['price'])
-            filled_size_delta = Decimal(msg['size'])
-            executed_value = prev_state.executed_value + executed_value_delta
-            filled_size = prev_state.filled_size + filled_size_delta
-            fee_rate = Decimal(msg.get('maker_fee_rate',
-                                       msg.get('taker_fee_rate')))
-            fee_delta = executed_value_delta * fee_rate
-            fill_fees = prev_state.fill_fees + fee_delta
-            state = OrderState(id=order_id,
-                               status=prev_state.status,
-                               size=prev_state.size,
-                               price=prev_state.price,
-                               executed_value=executed_value,
-                               filled_size=filled_size,
-                               fill_fees=fill_fees)
-            with self._lock:
-                self._orders[order_id] = state
-                self._timestamp = max(self._timestamp, msg['time'])
-        elif msg['type'] == 'change' and order_id in self._orders:
-            state = OrderState(id=order_id,
-                               status=prev_state.status,
-                               size=Decimal(msg['new_size']),
-                               price=prev_state.price,
-                               executed_value=prev_state.executed_value,
-                               filled_size=prev_state.filled_size,
-                               fill_fees=prev_state.fill_fees,
-                               )
-            with self._lock:
-                self._orders[order_id] = state
-                self._timestamp = max(self._timestamp, msg['time'])
-        elif msg['type'] == 'done' and order_id in self._orders:
-            done_reason = msg['reason']
-            state = OrderState(id=order_id,
-                               status='done',
-                               done_reason=done_reason,
-                               size=prev_state.size,
-                               price=prev_state.price,
-                               executed_value=prev_state.executed_value,
-                               filled_size=prev_state.filled_size,
-                               fill_fees=prev_state.fill_fees)
-            with self._lock:
-                self._orders[order_id] = state
-                self._timestamp = max(self._timestamp, msg['time'])
-        else:
-            pass
+        return order_id
 
 
-class AsyncOrderTracker(OrderTracker):
-    def __init__(self, client: OrderTrackerClient):
-        self.client = client
+class AsyncLimitOrderTracker(OrderTracker):
+    def __init__(self, products: t.List[str], api_passphrase: str,
+                 api_secret: str,
+                 api_key: str, ignore_untracked: bool = True):
+        self.ignore_untracked = ignore_untracked
+        self._client = OrderTrackerClient(products=products,
+                                          api_key=api_key,
+                                          api_passphrase=api_passphrase,
+                                          api_secret=api_secret)
+        self._client.start()
         self.watchlist = set()
 
     def remember(self, order_id: str) -> None:
         self.watchlist.add(order_id)
 
     def barrier_snapshot(self) -> t.Tuple[datetime, dict]:
-        if self.client.stop:
+        # so right now there's no way
+        if self._client.stop:
             raise ValueError()
-        timestamp, snapshot = self.client.snapshot()
-        for order_id in snapshot:
-            if order_id not in self.watchlist:
-                self.client.forget(order_id)
-            snapshot.pop(order_id)
+        timestamp, snapshot = self._client.snapshot()
+        if self.ignore_untracked:
+            for order_id in list(snapshot.keys()):
+                if order_id not in self.watchlist:
+                    self._client.forget(order_id)
+                snapshot.pop(order_id)
         return dateutil.parser.parse(timestamp), snapshot
 
     def snapshot(self) -> dict:
@@ -157,19 +195,20 @@ class AsyncOrderTracker(OrderTracker):
     def forget(self, order_id: str) -> None:
         if order_id in self.watchlist:
             self.watchlist.remove(order_id)
-        self.client.forget(order_id)
+        self._client.forget(order_id)
 
 
 def main():
+    from settings import coinbase as coinbase_settings
+
     products = [product['id'] for product in
                 cbpro.PublicClient().get_products()
                 if product['quote_currency'] == 'USD']
-    ws_client = OrderTrackerClient(products=products,
-                                   api_passphrase='omhj8xopyq',
-                                   api_secret='93X34sXJdBToewnMg4XnEKlt7AZ/UR9aZLN/APAEWSmnaNifkvFmze0k5/W8jDNgvtcCH3syu+yaOniv0AHd0A==',
-                                   api_key='7a03bd73cb494b04d27501a2b582e8c6')
-    ws_client.start()
-    tracker = AsyncOrderTracker(ws_client)
+    tracker = AsyncLimitOrderTracker(products=products,
+                                     api_key=coinbase_settings.API_KEY,
+                                     api_secret=coinbase_settings.SECRET,
+                                     api_passphrase=coinbase_settings.PASSPHRASE,
+                                     ignore_untracked=False)
     while True:
         time.sleep(15)
         timestamp, snapshot = tracker.barrier_snapshot()
@@ -177,6 +216,8 @@ def main():
             map(lambda o: Decimal(o['executed_value']), snapshot.values())))
         print(timestamp)
 
+
+__all__ = ['AsyncLimitOrderTracker']
 
 if __name__ == '__main__':
     main()

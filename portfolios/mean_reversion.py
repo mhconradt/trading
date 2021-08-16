@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
-from brain.order_tracker import SyncCoinbaseOrderTracker
+from brain.async_order_tracker import AsyncLimitOrderTracker
 from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
@@ -16,7 +16,7 @@ from indicators import TrailingVolume, SplitQuoteVolume, TripleEMA, BidAsk, \
     Ticker
 from indicators.sliding_candles import CandleSticks
 from settings import influx_db as influx_db_settings, \
-    coinbase as coinbase_settings, portfolio as portfolio_settings
+    coinbase as cb_settings, portfolio as portfolio_settings
 
 # STRATEGY PARAMETERS
 
@@ -24,7 +24,7 @@ DEVIATION_THRESHOLD = 0.001
 
 MIN_SELL_FRACTION = 5 / 6
 
-MIN_BUY_FRACTION = 1 / 2
+MIN_BUY_FRACTION = 0.
 
 TRADE_BUCKET = 'level1'
 
@@ -111,11 +111,17 @@ def main() -> None:
                             influx_db_settings.INFLUX_TOKEN,
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
-    coinbase = AuthenticatedClient(key=coinbase_settings.API_KEY,
-                                   b64secret=coinbase_settings.SECRET,
-                                   passphrase=coinbase_settings.PASSPHRASE,
-                                   api_url=coinbase_settings.API_URL)
-    tracker = SyncCoinbaseOrderTracker(coinbase)
+    coinbase = AuthenticatedClient(key=cb_settings.API_KEY,
+                                   b64secret=cb_settings.SECRET,
+                                   passphrase=cb_settings.PASSPHRASE,
+                                   api_url=cb_settings.API_URL)
+    products = [product['id'] for product in coinbase.get_products() if
+                product['quote_currency'] == portfolio_settings.QUOTE]
+    tracker = AsyncLimitOrderTracker(products=products,
+                                     api_key=cb_settings.API_KEY,
+                                     api_secret=cb_settings.SECRET,
+                                     api_passphrase=cb_settings.PASSPHRASE,
+                                     ignore_untracked=False)
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
     cool_down = VolatilityCoolDown(buy_period=timedelta(minutes=0))
