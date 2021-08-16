@@ -110,7 +110,7 @@ def main() -> None:
                                market_blacklist={'USDT-USD', 'DAI-USD'},
                                stop_loss=stop_loss, liquidate_on_shutdown=True,
                                quote=portfolio_settings.QUOTE,
-                               buy_order_type='market',
+                               order_tracker=None, buy_order_type='market',
                                sell_order_type='market')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:

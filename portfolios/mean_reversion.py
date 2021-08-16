@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
+from brain.order_tracker import SyncCoinbaseOrderTracker
 from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
@@ -21,9 +22,9 @@ from settings import influx_db as influx_db_settings, \
 
 DEVIATION_THRESHOLD = 0.001
 
-MIN_SELL_FRACTION = 2 / 3
+MIN_SELL_FRACTION = 5 / 6
 
-MIN_BUY_FRACTION = 0.  # I don't particularly care here
+MIN_BUY_FRACTION = 1 / 2
 
 TRADE_BUCKET = 'level1'
 
@@ -114,6 +115,7 @@ def main() -> None:
                                    b64secret=coinbase_settings.SECRET,
                                    passphrase=coinbase_settings.PASSPHRASE,
                                    api_url=coinbase_settings.API_URL)
+    tracker = SyncCoinbaseOrderTracker(coinbase)
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
     cool_down = VolatilityCoolDown(buy_period=timedelta(minutes=0))
@@ -142,12 +144,12 @@ def main() -> None:
                                stop_loss=stop_loss,
                                liquidate_on_shutdown=False,
                                quote=portfolio_settings.QUOTE,
-                               buy_order_type='limit', sell_order_type='limit',
+                               order_tracker=tracker, buy_order_type='limit',
                                buy_target_horizon=timedelta(minutes=5),
                                sell_target_horizon=timedelta(minutes=5),
                                buy_age_limit=timedelta(seconds=15),
                                sell_age_limit=timedelta(seconds=15),
-                               post_only=True)
+                               post_only=True, sell_order_type='limit')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()

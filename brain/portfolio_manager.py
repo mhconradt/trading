@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from pandas import DataFrame, Series
 
-from brain.order_tracker import SyncCoinbaseOrderTracker
+from brain.order_tracker import OrderTracker
 from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             DesiredLimitSell, PendingLimitSell, Sold,
                             DesiredMarketSell,
@@ -141,14 +141,15 @@ class PortfolioManager:
                  cool_down: VolatilityCoolDown,
                  market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
                  liquidate_on_shutdown: bool, quote: str,
-                 buy_order_type: str = 'limit', sell_order_type: str = 'limit',
+                 order_tracker: OrderTracker, *,
+                 buy_order_type: str = 'limit',
                  buy_target_horizon=timedelta(minutes=10),
                  sell_target_horizon=timedelta(minutes=5),
                  buy_time_in_force: str = 'GTC',
                  sell_time_in_force: str = 'GTC',
                  buy_age_limit=timedelta(minutes=1),
-                 sell_age_limit=timedelta(minutes=1),
-                 post_only: bool = False):
+                 sell_age_limit=timedelta(minutes=1), post_only: bool = False,
+                 sell_order_type: str = 'limit'):
         self.quote = quote
         self.buy_target_horizon = buy_target_horizon
         self.sell_target_horizon = sell_target_horizon
@@ -164,7 +165,7 @@ class PortfolioManager:
         accounts = self.client.get_accounts()
         self.quote_account_id = [account['id'] for account in accounts if
                                  account['currency'] == self.quote][0]
-        self.tracker = SyncCoinbaseOrderTracker(client)
+        self.tracker = order_tracker
         self.pop_limit = Decimal('0.25')
         self.pov_limit = Decimal('1')
 
