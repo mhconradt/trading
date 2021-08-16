@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
-from brain.async_order_tracker import AsyncLimitOrderTracker
 from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
 from brain.volatility_cooldown import VolatilityCoolDown
@@ -15,6 +14,7 @@ from helper.coinbase import AuthenticatedClient
 from indicators import TrailingVolume, SplitQuoteVolume, TripleEMA, BidAsk, \
     Ticker
 from indicators.sliding_candles import CandleSticks
+from order_tracker import AsyncCoinbaseTracker
 from settings import influx_db as influx_db_settings, \
     coinbase as cb_settings, portfolio as portfolio_settings
 
@@ -117,11 +117,11 @@ def main() -> None:
                                    api_url=cb_settings.API_URL)
     products = [product['id'] for product in coinbase.get_products() if
                 product['quote_currency'] == portfolio_settings.QUOTE]
-    tracker = AsyncLimitOrderTracker(products=products,
-                                     api_key=cb_settings.API_KEY,
-                                     api_secret=cb_settings.SECRET,
-                                     api_passphrase=cb_settings.PASSPHRASE,
-                                     ignore_untracked=False)
+    tracker = AsyncCoinbaseTracker(products=products,
+                                   api_key=cb_settings.API_KEY,
+                                   api_secret=cb_settings.SECRET,
+                                   api_passphrase=cb_settings.PASSPHRASE,
+                                   ignore_untracked=True)
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
     cool_down = VolatilityCoolDown(buy_period=timedelta(minutes=0))

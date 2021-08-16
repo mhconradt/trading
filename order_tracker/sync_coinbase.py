@@ -1,34 +1,16 @@
 import logging
 import typing as t
-from abc import ABC, abstractmethod
 from datetime import datetime
 
 from cbpro import AuthenticatedClient
 
 from helper.coinbase import get_server_time
+from order_tracker.order_tracker import OrderTracker
 
 logger = logging.getLogger(__name__)
 
 
-class OrderTracker(ABC):
-    @abstractmethod
-    def remember(self, order_id: str) -> None:
-        ...
-
-    @abstractmethod
-    def barrier_snapshot(self) -> t.Tuple[datetime, dict]:
-        ...
-
-    @abstractmethod
-    def snapshot(self) -> dict:
-        ...
-
-    @abstractmethod
-    def forget(self, order_id: str) -> None:
-        ...
-
-
-class SyncCoinbaseOrderTracker(OrderTracker):
+class SyncCoinbaseTracker(OrderTracker):
     def __init__(self, client: AuthenticatedClient,
                  watchlist: t.Optional[t.List[str]] = None):
         self.client = client
@@ -60,18 +42,3 @@ class SyncCoinbaseOrderTracker(OrderTracker):
         if order_id in self.watchlist:
             logger.debug(f"Forgetting {order_id}")
             self.watchlist.remove(order_id)
-
-
-def main():
-    from helper.coinbase import AuthenticatedClient
-    from settings import coinbase as coinbase_settings
-
-    client = AuthenticatedClient(passphrase=coinbase_settings.PASSPHRASE,
-                                 key=coinbase_settings.API_KEY,
-                                 b64secret=coinbase_settings.SECRET)
-    o = client.get_order('3fc03072-924b-40f7-9cff-febc8546fefc')
-    print(o)
-
-
-if __name__ == '__main__':
-    main()

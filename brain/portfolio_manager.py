@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 from pandas import DataFrame, Series
 
-from brain.order_tracker import OrderTracker
 from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             DesiredLimitSell, PendingLimitSell, Sold,
                             DesiredMarketSell,
@@ -25,6 +24,7 @@ from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import get_server_time, AuthenticatedClient
 from indicators.protocols import InstantIndicator, BidAskIndicator, \
     CandlesIndicator
+from order_tracker import OrderTracker
 
 logger = logging.getLogger(__name__)
 

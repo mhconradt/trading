@@ -8,7 +8,7 @@ from threading import Lock
 import cbpro
 import dateutil.parser
 
-from brain.order_tracker import OrderTracker
+from order_tracker.order_tracker import OrderTracker
 
 
 # Simulate the Coinbase API.
@@ -161,7 +161,7 @@ class OrderTrackerClient(cbpro.WebsocketClient):
         return order_id
 
 
-class AsyncLimitOrderTracker(OrderTracker):
+class AsyncCoinbaseTracker(OrderTracker):
     def __init__(self, products: t.List[str], api_passphrase: str,
                  api_secret: str,
                  api_key: str, ignore_untracked: bool = True):
@@ -204,11 +204,11 @@ def main():
     products = [product['id'] for product in
                 cbpro.PublicClient().get_products()
                 if product['quote_currency'] == 'USD']
-    tracker = AsyncLimitOrderTracker(products=products,
-                                     api_key=coinbase_settings.API_KEY,
-                                     api_secret=coinbase_settings.SECRET,
-                                     api_passphrase=coinbase_settings.PASSPHRASE,
-                                     ignore_untracked=False)
+    tracker = AsyncCoinbaseTracker(products=products,
+                                   api_key=coinbase_settings.API_KEY,
+                                   api_secret=coinbase_settings.SECRET,
+                                   api_passphrase=coinbase_settings.PASSPHRASE,
+                                   ignore_untracked=False)
     while True:
         time.sleep(15)
         timestamp, snapshot = tracker.barrier_snapshot()
@@ -217,7 +217,7 @@ def main():
         print(timestamp)
 
 
-__all__ = ['AsyncLimitOrderTracker']
+__all__ = ['AsyncCoinbaseTracker']
 
 if __name__ == '__main__':
     main()

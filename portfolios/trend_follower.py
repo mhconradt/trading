@@ -15,6 +15,7 @@ from indicators import Ticker, TrailingVolume, TrendAcceleration, \
     TrendStability, Momentum, BidAsk
 from indicators.fib_trader import FibTrader
 from indicators.sliding_candles import CandleSticks
+from order_tracker import SyncCoinbaseTracker
 from settings import influx_db as influx_db_settings, \
     coinbase as coinbase_settings, portfolio as portfolio_settings
 
@@ -85,6 +86,7 @@ def main() -> None:
                                    b64secret=coinbase_settings.SECRET,
                                    passphrase=coinbase_settings.PASSPHRASE,
                                    api_url=coinbase_settings.API_URL)
+    tracker = SyncCoinbaseTracker(coinbase)
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
     cool_down = VolatilityCoolDown(buy_period=timedelta(minutes=0))
@@ -110,7 +112,7 @@ def main() -> None:
                                market_blacklist={'USDT-USD', 'DAI-USD'},
                                stop_loss=stop_loss, liquidate_on_shutdown=True,
                                quote=portfolio_settings.QUOTE,
-                               order_tracker=None, buy_order_type='market',
+                               order_tracker=tracker, buy_order_type='market',
                                sell_order_type='market')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
