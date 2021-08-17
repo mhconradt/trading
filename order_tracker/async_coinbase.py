@@ -190,7 +190,7 @@ class AsyncCoinbaseTracker(OrderTracker):
             for order_id in list(snapshot.keys()):
                 if order_id not in self.watchlist:
                     self._client.forget(order_id)
-                snapshot.pop(order_id)
+                    snapshot.pop(order_id)
         return timestamp, snapshot
 
     def snapshot(self) -> dict:
@@ -217,7 +217,7 @@ def main():
                                    api_key=coinbase_settings.API_KEY,
                                    api_secret=coinbase_settings.SECRET,
                                    api_passphrase=coinbase_settings.PASSPHRASE,
-                                   ignore_untracked=False)
+                                   ignore_untracked=True)
     while True:
         timestamp, snapshot = tracker.barrier_snapshot()
         print(sum(

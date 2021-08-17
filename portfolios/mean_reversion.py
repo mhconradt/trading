@@ -8,7 +8,6 @@ import pandas as pd
 from influxdb_client import InfluxDBClient
 
 from brain.portfolio_manager import PortfolioManager
-from brain.stop_loss import SimpleStopLoss
 from helper.coinbase import AuthenticatedClient
 from indicators import TrailingVolume, SplitQuoteVolume, TripleEMA, BidAsk, \
     Ticker
@@ -121,8 +120,6 @@ def main() -> None:
                                    api_secret=cb_settings.SECRET,
                                    api_passphrase=cb_settings.PASSPHRASE,
                                    ignore_untracked=False)
-    stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
-                               stop_loss=portfolio_settings.STOP_LOSS)
     buy_indicator = MeanReversionBuy(client, periods=EMA_PERIODS,
                                      frequency=FREQUENCY)
     sell_indicator = MeanReversionSell(client, periods=EMA_PERIODS,
