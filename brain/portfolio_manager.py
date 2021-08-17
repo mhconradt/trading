@@ -19,8 +19,6 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             PendingMarketBuy, DesiredMarketBuy,
                             Download, RootState)
 from brain.position_counter import PositionCounter
-from brain.stop_loss import SimpleStopLoss
-from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import get_server_time, AuthenticatedClient
 from indicators.protocols import InstantIndicator, BidAskIndicator, \
     CandlesIndicator
@@ -130,6 +128,9 @@ def adjust_spending_target(targets: pd.Series,
     return weights.fillna(0.).map(Decimal)
 
 
+# PROBLEM: The tick time is coupled with the most recent message timestamp.
+
+
 class PortfolioManager:
     def __init__(self, client: AuthenticatedClient,
                  candles_src: CandlesIndicator,
@@ -138,11 +139,9 @@ class PortfolioManager:
                  price_indicator: InstantIndicator,
                  volume_indicator: InstantIndicator,
                  bid_ask_indicator: BidAskIndicator,
-                 cool_down: VolatilityCoolDown,
-                 market_blacklist: t.Container[str], stop_loss: SimpleStopLoss,
+                 market_blacklist: t.Container[str],
                  liquidate_on_shutdown: bool, quote: str,
-                 order_tracker: OrderTracker, *,
-                 buy_order_type: str = 'limit',
+                 order_tracker: OrderTracker, *, buy_order_type: str = 'limit',
                  buy_target_horizon=timedelta(minutes=10),
                  sell_target_horizon=timedelta(minutes=5),
                  buy_time_in_force: str = 'GTC',
@@ -219,8 +218,6 @@ class PortfolioManager:
         self.pending_market_sells: t.List[PendingMarketSell] = []
         self.sells: t.List[Sold] = []
 
-        self.cool_down = cool_down
-        self.stop_loss = stop_loss
         self.blacklist = market_blacklist
 
         self.liquidate_on_shutdown = liquidate_on_shutdown
@@ -312,10 +309,7 @@ class PortfolioManager:
     def limit_weights(self, target_weights: Series,
                       spending_limit: Decimal) -> Series:
         nil_weights = Series([], dtype=np.float64)
-        cooling_down = filter(self.cool_down.cooling_down,
-                              target_weights.index)
-        allowed = target_weights.index.difference(cooling_down)
-        allowed = allowed.difference(self.blacklist)
+        allowed = target_weights.index.difference(self.blacklist)
         filtered_weights = target_weights.loc[allowed]
         if not len(filtered_weights):
             return nil_weights
@@ -402,7 +396,6 @@ class PortfolioManager:
             order = self.client.place_market_order(market, side='buy',
                                                    funds=str(funds),
                                                    stp='cn')
-            self.cool_down.bought(market)
             if 'id' not in order:
                 logger.warning(order)
                 self.counter.decrement()
@@ -463,7 +456,6 @@ class PortfolioManager:
                                                   time_in_force=tif,
                                                   post_only=post_only,
                                                   stp='cn')
-            self.cool_down.bought(market)
             if 'id' not in order:
                 next_generation.append(buy)
                 logger.warning(f"Error placing buy order {order}")
@@ -662,7 +654,6 @@ class PortfolioManager:
                 next_generation.append(next_position)
             else:
                 logger.debug(f"dropping position {position}")
-                self.cool_down.sold(market)
         self.active_positions = next_generation
 
     def check_desired_market_sells(self) -> None:
@@ -1027,7 +1018,6 @@ class PortfolioManager:
                 # this should never happen with the synchronous order tracker
                 logger.warning("backing off")
                 continue
-            self.cool_down.set_tick(self.tick_time)
             self.manage_positions()
             last_tick = get_server_time()
             logger.info(f"Tick took {time.time() - iteration_start:.1f}s")

@@ -9,7 +9,6 @@ from influxdb_client import InfluxDBClient
 
 from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
-from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import AuthenticatedClient
 from indicators import TrailingVolume, SplitQuoteVolume, TripleEMA, BidAsk, \
     Ticker
@@ -124,7 +123,6 @@ def main() -> None:
                                    ignore_untracked=False)
     stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
                                stop_loss=portfolio_settings.STOP_LOSS)
-    cool_down = VolatilityCoolDown(buy_period=timedelta(minutes=0))
     buy_indicator = MeanReversionBuy(client, periods=EMA_PERIODS,
                                      frequency=FREQUENCY)
     sell_indicator = MeanReversionSell(client, periods=EMA_PERIODS,
@@ -144,10 +142,9 @@ def main() -> None:
                                sell_indicator=sell_indicator,
                                price_indicator=price_indicator,
                                volume_indicator=volume_indicator,
-                               bid_ask_indicator=bid_ask, cool_down=cool_down,
+                               bid_ask_indicator=bid_ask,
                                market_blacklist={'USDT-USD', 'DAI-USD',
                                                  'CLV-USD', 'PAX-USD'},
-                               stop_loss=stop_loss,
                                liquidate_on_shutdown=False,
                                quote=portfolio_settings.QUOTE,
                                order_tracker=tracker, buy_order_type='limit',

@@ -108,9 +108,9 @@ def main() -> None:
                                sell_indicator=sell_indicator,
                                price_indicator=price_indicator,
                                volume_indicator=volume_indicator,
-                               bid_ask_indicator=bid_ask, cool_down=cool_down,
+                               bid_ask_indicator=bid_ask,
                                market_blacklist={'USDT-USD', 'DAI-USD'},
-                               stop_loss=stop_loss, liquidate_on_shutdown=True,
+                               liquidate_on_shutdown=True,
                                quote=portfolio_settings.QUOTE,
                                order_tracker=tracker, buy_order_type='market',
                                sell_order_type='market')
