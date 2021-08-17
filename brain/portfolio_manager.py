@@ -893,19 +893,9 @@ class PortfolioManager:
         self.pending_limit_sells = next_generation
 
     def check_sold(self) -> None:
-        """
-        Record final information about each position.
-        """
-        while self.sells:
-            sell = self.sells.pop()
-            state = sell
-            while state:
-                if isinstance(state, ActivePosition):
-                    gain = (sell.price - state.price) * sell.size
-                    print(f"Sold! {sell.market}: ${gain}")
-                    break
-                state = state.previous_state
+        for _ in self.sells:
             self.counter.decrement()
+        self.sells = []
 
     def set_tick_variables(self) -> None:
         self.set_portfolio_available_funds()
