@@ -22,7 +22,7 @@ from settings import influx_db as influx_db_settings, \
 
 DEVIATION_THRESHOLD = 0.001
 
-MIN_SELL_FRACTION = 5 / 6
+MIN_SELL_FRACTION = 7 / 8
 
 MIN_BUY_FRACTION = 0.
 
