@@ -126,12 +126,14 @@ class TradesMessageHandler(MessageHandler):
             print(f'catching up {product} {watermark}->{trade_id}')
             gap = catchup(product, watermark, trade_id)
             for item in gap:
+                print(item['time'])
                 self.checkpoint_start = min(self.checkpoint_start,
                                             item['time'])
                 self.sink.send(item)
             print(f'caught up {product}')
         self.sink.send(trade)
         self.watermarks[product] = trade_id
+        print(trade['time'])
         self.checkpoint_start = min(self.checkpoint_start, trade['time'])
         self.checkpoint_end = max(trade['time'],
                                   self.checkpoint_end)
