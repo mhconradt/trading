@@ -137,7 +137,7 @@ class TradesMessageHandler(MessageHandler):
                                   self.checkpoint_end)
         if not self.replayed_missed_tasks:
             if all_caught_up and self.checkpoint_start != 'Z':
-                print('replaying')
+                print(f'replay {self.checkpoint_start}->{self.checkpoint_end}')
                 replay.replay("matches", self.checkpoint_start,
                               self.checkpoint_end)
                 self.replayed_missed_tasks = True
