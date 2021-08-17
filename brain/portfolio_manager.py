@@ -24,6 +24,8 @@ from indicators.protocols import InstantIndicator, BidAskIndicator, \
     CandlesIndicator
 from order_tracker import OrderTracker
 
+ORDER_WAIT_TIME = timedelta(seconds=5)
+
 logger = logging.getLogger(__name__)
 
 
@@ -489,7 +491,7 @@ class PortfolioManager:
                 next_generation.append(buy)
                 continue
             order_id = buy.order_id
-            if buy.created_at > self.order_snapshot_time:
+            if buy.created_at - self.order_snapshot_time > ORDER_WAIT_TIME:
                 # buy was created during this iteration, nothing to do
                 next_generation.append(buy)
                 continue
@@ -550,7 +552,7 @@ class PortfolioManager:
                 next_generation.append(buy)
                 continue
             order_id = buy.order_id
-            if buy.created_at > self.order_snapshot_time:
+            if buy.created_at - self.order_snapshot_time > ORDER_WAIT_TIME:
                 # buy was created during this iteration, nothing to do
                 next_generation.append(buy)
                 continue
@@ -708,7 +710,7 @@ class PortfolioManager:
         next_generation: t.List[PendingMarketSell] = []
         for sell in self.pending_market_sells:
             order_id = sell.order_id
-            if sell.created_at > self.order_snapshot_time:
+            if sell.created_at - self.order_snapshot_time > ORDER_WAIT_TIME:
                 next_generation.append(sell)
                 continue
             elif order_id not in self.orders:
@@ -837,7 +839,7 @@ class PortfolioManager:
         next_generation: t.List[PendingLimitSell] = []
         for sell in self.pending_limit_sells:
             order_id = sell.order_id
-            if sell.created_at > self.order_snapshot_time:
+            if sell.created_at - self.order_snapshot_time > ORDER_WAIT_TIME:
                 # created during this generation, nothing to see here
                 next_generation.append(sell)
                 continue

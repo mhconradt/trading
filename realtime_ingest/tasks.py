@@ -1,3 +1,4 @@
+import itertools as it
 import typing as t
 from collections import defaultdict
 
@@ -67,7 +68,7 @@ class TaskDefinition:
         task_id = self.task_id()
         runs = self.task_api.get_runs(task_id, after_time=start,
                                       before_time=end)
-        for run in runs:
+        for run in it.islice(runs, 0, 5):  # hack to only replay last five runs
             print('replaying', run.id)
             self.task_api.retry_run(task_id, run.id)
 

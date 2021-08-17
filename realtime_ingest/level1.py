@@ -43,8 +43,6 @@ def catchup(product: str, frm: int, to: int) -> t.Iterable[dict]:
     client = PublicClient()
     for trade in client.get_product_trades(product):
         trade_id = trade['trade_id']
-        if not (to - trade_id) % 1000:
-            time.sleep(0.1)  # TODO: Figure out rate limiting this endpoint
         if trade_id >= to:
             continue
         elif trade_id <= frm:
@@ -116,8 +114,7 @@ class TradesMessageHandler(MessageHandler):
         watermark = self.watermarks.get(product, trade_id)
         # all markets are now being processed in order
         needs_catch_up = watermark and trade_id > watermark + 1
-        all_caught_up = not (
-                any(self.catching_up.values()) or needs_catch_up)
+        all_caught_up = not (any(self.catching_up.values()) or needs_catch_up)
         if not self.catching_up.get(product, False) and needs_catch_up:
             self.replayed_missed_tasks = False
         self.catching_up[product] = needs_catch_up
@@ -126,14 +123,12 @@ class TradesMessageHandler(MessageHandler):
             print(f'catching up {product} {watermark}->{trade_id}')
             gap = catchup(product, watermark, trade_id)
             for item in gap:
-                print(item['time'])
                 self.checkpoint_start = min(self.checkpoint_start,
                                             item['time'])
                 self.sink.send(item)
             print(f'caught up {product}')
         self.sink.send(trade)
         self.watermarks[product] = trade_id
-        print(trade['time'])
         self.checkpoint_start = min(self.checkpoint_start, trade['time'])
         self.checkpoint_end = max(trade['time'],
                                   self.checkpoint_end)
