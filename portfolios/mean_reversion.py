@@ -20,8 +20,10 @@ from settings import influx_db as influx_db_settings, \
 
 DEVIATION_THRESHOLD = 0.001
 
-MIN_SELL_FRACTION = 0.9  # we in the moving business, NOT the storage business
+# we're in the moving AND intermediate storage biz
+MIN_SELL_FRACTION = 7 / 8
 
+# the best trades can be the ones you don't make
 MIN_BUY_FRACTION = 0.
 
 TRADE_BUCKET = 'level1'
@@ -39,9 +41,9 @@ logger = logging.getLogger(__name__)
 
 
 class MeanReversionBuy:
-    def __init__(self, db: InfluxDBClient, periods: int = 26,
+    def __init__(self, db: InfluxDBClient, periods: int = EMA_PERIODS,
                  frequency: timedelta = timedelta(minutes=1)):
-        self.threshold = 0.001
+        self.threshold = DEVIATION_THRESHOLD
         self.periods = periods
         self.ema = TripleEMA(db, periods, frequency,
                              portfolio_settings.QUOTE)
@@ -72,7 +74,7 @@ class MeanReversionBuy:
 
 
 class MeanReversionSell:
-    def __init__(self, db: InfluxDBClient, periods: int = 26,
+    def __init__(self, db: InfluxDBClient, periods: int = EMA_PERIODS,
                  frequency: timedelta = timedelta(minutes=1)):
         self.threshold = DEVIATION_THRESHOLD
         self.periods = periods
@@ -147,8 +149,8 @@ def main() -> None:
                                order_tracker=tracker, buy_order_type='limit',
                                buy_target_horizon=timedelta(minutes=5),
                                sell_target_horizon=timedelta(minutes=5),
-                               buy_age_limit=timedelta(seconds=15),
-                               sell_age_limit=timedelta(seconds=15),
+                               buy_age_limit=timedelta(seconds=30),
+                               sell_age_limit=timedelta(seconds=30),
                                post_only=True, sell_order_type='limit')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
