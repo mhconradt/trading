@@ -149,7 +149,7 @@ def main() -> None:
                                order_tracker=tracker, buy_order_type='limit',
                                buy_target_horizon=timedelta(minutes=5),
                                sell_target_horizon=timedelta(minutes=5),
-                               buy_age_limit=timedelta(seconds=30),
+                               buy_age_limit=timedelta(seconds=15),
                                sell_age_limit=timedelta(seconds=30),
                                post_only=True, sell_order_type='limit')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
