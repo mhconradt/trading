@@ -132,14 +132,10 @@ class OrderTrackerClient(cbpro.WebsocketClient):
 
     def on_message(self, msg: dict) -> None:
         msg_type = msg['type']
-        if msg_type == 'subscriptions':
+        if msg_type == 'subscriptions' or msg_type == 'heartbeat':
             return None
         with self._lock:
             timestamp = dateutil.parser.parse(msg['time'])
-            if msg_type == 'heartbeat':
-                self._timestamp = max(self._timestamp, timestamp)
-                return None
-            # beyond here everything must be an order update message
             order_id = self.get_order_id(msg)
             prev_state = self._orders.get(order_id)
             if msg_type == 'received':
