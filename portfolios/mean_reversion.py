@@ -22,9 +22,11 @@ DEVIATION_THRESHOLD = 0.001
 
 # we're in the moving AND intermediate storage biz
 MIN_SELL_FRACTION = 7 / 8
+MAX_SELL_FRACTION = 1.
 
-# the best trades can be the ones you don't make
+# try to more evenly distribute buys to let the price have more effect
 MIN_BUY_FRACTION = 0.
+MAX_BUY_FRACTION = 0.75
 
 TRADE_BUCKET = 'level1'
 
@@ -38,6 +40,10 @@ logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
                     level=logging.DEBUG)
 
 logger = logging.getLogger(__name__)
+
+
+def min_max(minimum: float, a: np.ndarray, maximum: float) -> np.ndarray:
+    return np.maximum(minimum, np.minimum(maximum, a))
 
 
 class MeanReversionBuy:
@@ -67,7 +73,9 @@ class MeanReversionBuy:
         below = deviation > self.threshold
         markets = below[below].index.intersection(quote_volume.index)
         adjustment = np.log(deviation[markets] / self.threshold)
-        hold_fraction = 1. - np.maximum(MIN_BUY_FRACTION, ape_index[markets])
+        buy_fraction = min_max(MIN_BUY_FRACTION, ape_index[markets],
+                               MAX_BUY_FRACTION)
+        hold_fraction = 1. - buy_fraction
         hold_fraction = hold_fraction ** adjustment
         buy_fraction = 1. - hold_fraction
         return buy_fraction * volume_fraction[markets]
@@ -98,8 +106,9 @@ class MeanReversionSell:
         above = deviations > self.threshold
         sell_markets = above[above].index.intersection(ape_index.index)
         # sell more quickly if it's quite apish
-        hold_fraction = 1. - np.maximum(MIN_SELL_FRACTION,
-                                        ape_index[sell_markets])
+        sell_fraction = min_max(MIN_SELL_FRACTION, ape_index[sell_markets],
+                                MAX_SELL_FRACTION)
+        hold_fraction = 1. - sell_fraction
         # always >= 1.0
         acceleration = np.log(deviations[sell_markets] / self.threshold)
         # increase the rate of selling with larger deviations
