@@ -9,7 +9,7 @@ from influxdb_client import InfluxDBClient
 
 from brain.portfolio_manager import PortfolioManager
 from helper.coinbase import AuthenticatedClient
-from indicators import TrailingVolume, SplitQuoteVolume, TripleEMA, BidAsk, \
+from indicators import TrailingVolume, TripleEMA, BidAsk, \
     Ticker
 from indicators.sliding_candles import CandleSticks
 from order_tracker.async_coinbase import AsyncCoinbaseTracker
@@ -53,9 +53,6 @@ class MeanReversionBuy:
         self.periods = periods
         self.ema = TripleEMA(db, periods, frequency,
                              portfolio_settings.QUOTE)
-        self.split_quote_volume = SplitQuoteVolume(db, 1, frequency,
-                                                   TRADE_BUCKET,
-                                                   portfolio_settings.QUOTE)
 
     @property
     def periods_required(self) -> int:
@@ -63,22 +60,17 @@ class MeanReversionBuy:
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         prices = candles.close.unstack('market').iloc[-1]
-        quote_volume = self.split_quote_volume.compute()
-        up_volume, down_volume = quote_volume['sell'], quote_volume['buy']
-        total_volume = up_volume + down_volume
-        ape_index = down_volume / total_volume
-        volume_fraction = total_volume / total_volume.sum()
+        quote_volume = candles.quote_volume.unstack('market').iloc[-1]
+        volume_fraction = quote_volume / quote_volume.sum()
         moving_averages = self.ema.compute()
         deviation = 1 - (prices / moving_averages)
         below = deviation > self.threshold
-        markets = below[below].index.intersection(quote_volume.index)
-        adjustment = np.log(deviation[markets] / self.threshold)
-        buy_fraction = min_max(MIN_BUY_FRACTION, ape_index[markets],
-                               MAX_BUY_FRACTION)
+        adjustment = np.log(deviation / self.threshold)
+        buy_fraction = 0.5
         hold_fraction = 1. - buy_fraction
         hold_fraction = hold_fraction ** adjustment
         buy_fraction = 1. - hold_fraction
-        return buy_fraction * volume_fraction[markets]
+        return (buy_fraction * volume_fraction)[below]
 
 
 class MeanReversionSell:
@@ -88,9 +80,6 @@ class MeanReversionSell:
         self.periods = periods
         self.ema = TripleEMA(db, periods, frequency,
                              portfolio_settings.QUOTE)
-        self.split_quote_volume = SplitQuoteVolume(db, 1, frequency,
-                                                   TRADE_BUCKET,
-                                                   portfolio_settings.QUOTE)
 
     @property
     def periods_required(self) -> int:
@@ -99,18 +88,12 @@ class MeanReversionSell:
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         prices = candles.close.unstack('market').iloc[-1]
         moving_averages = self.ema.compute()
-        quote_volume = self.split_quote_volume.compute()
-        up_volume, down_volume = quote_volume['sell'], quote_volume['buy']
-        ape_index = up_volume / (up_volume + down_volume)
         deviations = prices / moving_averages - 1.
         above = deviations > self.threshold
-        sell_markets = above[above].index.intersection(ape_index.index)
-        # sell more quickly if it's quite apish
-        sell_fraction = min_max(MIN_SELL_FRACTION, ape_index[sell_markets],
-                                MAX_SELL_FRACTION)
+        sell_fraction = 7 / 8
         hold_fraction = 1. - sell_fraction
         # always >= 1.0
-        acceleration = np.log(deviations[sell_markets] / self.threshold)
+        acceleration = np.log(deviations[above] / self.threshold)
         # increase the rate of selling with larger deviations
         return 1. - hold_fraction ** acceleration
 
