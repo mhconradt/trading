@@ -17,16 +17,14 @@ from settings import influx_db as influx_db_settings, \
     coinbase as cb_settings, portfolio as portfolio_settings
 
 # STRATEGY PARAMETERS
+BUY_FRACTION_BASE = 1 / 2
+SELL_FRACTION_BASE = 9 / 10
 
 DEVIATION_THRESHOLD = 0.001
 
 # we're in the moving AND intermediate storage biz
-MIN_SELL_FRACTION = 7 / 8
-MAX_SELL_FRACTION = 1.
 
 # try to more evenly distribute buys to let the price have more effect
-MIN_BUY_FRACTION = 0.
-MAX_BUY_FRACTION = 0.75
 
 TRADE_BUCKET = 'level1'
 
@@ -40,10 +38,6 @@ logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
                     level=logging.DEBUG)
 
 logger = logging.getLogger(__name__)
-
-
-def min_max(minimum: float, a: np.ndarray, maximum: float) -> np.ndarray:
-    return np.maximum(minimum, np.minimum(maximum, a))
 
 
 class MeanReversionBuy:
@@ -65,10 +59,9 @@ class MeanReversionBuy:
         moving_averages = self.ema.compute()
         deviation = 1 - (prices / moving_averages)
         below = deviation > self.threshold
-        adjustment = np.log(deviation / self.threshold)
-        buy_fraction = 0.5
-        hold_fraction = 1. - buy_fraction
-        hold_fraction = hold_fraction ** adjustment
+        adjustment = np.log(deviation[below] / self.threshold)
+        hold_fraction_base = 1. - BUY_FRACTION_BASE
+        hold_fraction = hold_fraction_base ** adjustment
         buy_fraction = 1. - hold_fraction
         return (buy_fraction * volume_fraction)[below]
 
@@ -90,12 +83,12 @@ class MeanReversionSell:
         moving_averages = self.ema.compute()
         deviations = prices / moving_averages - 1.
         above = deviations > self.threshold
-        sell_fraction = 7 / 8
-        hold_fraction = 1. - sell_fraction
+        hold_fraction_base = 1. - SELL_FRACTION_BASE
         # always >= 1.0
         acceleration = np.log(deviations[above] / self.threshold)
-        # increase the rate of selling with larger deviations
-        return 1. - hold_fraction ** acceleration
+        # amount held geometrically decreases with the deviation
+        hold_fraction = hold_fraction_base ** acceleration
+        return 1. - hold_fraction
 
 
 def main() -> None:
