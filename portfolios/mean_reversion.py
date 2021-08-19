@@ -18,7 +18,7 @@ from settings import influx_db as influx_db_settings, \
 
 # STRATEGY PARAMETERS
 BUY_FRACTION_BASE = 1 / 2
-SELL_FRACTION_BASE = 9 / 10
+SELL_FRACTION_BASE = 8 / 9
 
 DEVIATION_THRESHOLD = 0.001
 
