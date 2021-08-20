@@ -19,12 +19,7 @@ from settings import influx_db as influx_db_settings, \
 # STRATEGY PARAMETERS
 BUY_FRACTION_BASE = 1 / 2
 SELL_FRACTION_BASE = 8 / 9
-
 DEVIATION_THRESHOLD = 0.001
-
-# we're in the moving AND intermediate storage biz
-
-# try to more evenly distribute buys to let the price have more effect
 
 TRADE_BUCKET = 'level1'
 
@@ -132,7 +127,7 @@ def main() -> None:
                                liquidate_on_shutdown=False,
                                quote=portfolio_settings.QUOTE,
                                order_tracker=tracker, buy_order_type='limit',
-                               buy_target_horizon=timedelta(minutes=5),
+                               buy_target_horizon=timedelta(minutes=10),
                                sell_target_horizon=timedelta(minutes=5),
                                buy_age_limit=timedelta(seconds=15),
                                sell_age_limit=timedelta(seconds=30),
