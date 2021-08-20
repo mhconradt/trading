@@ -27,7 +27,7 @@ TICKER_BUCKET = 'level1'
 
 FREQUENCY = timedelta(minutes=1)
 
-EMA_PERIODS = 26
+EMA_PERIODS = 20
 
 logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
                     level=logging.DEBUG)
@@ -127,9 +127,9 @@ def main() -> None:
                                liquidate_on_shutdown=False,
                                quote=portfolio_settings.QUOTE,
                                order_tracker=tracker, buy_order_type='limit',
-                               buy_target_horizon=timedelta(minutes=10),
+                               buy_target_horizon=timedelta(minutes=5),
                                sell_target_horizon=timedelta(minutes=5),
-                               buy_age_limit=timedelta(seconds=15),
+                               buy_age_limit=timedelta(seconds=30),
                                sell_age_limit=timedelta(seconds=30),
                                post_only=True, sell_order_type='limit')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
