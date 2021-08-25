@@ -4,12 +4,12 @@ dependencies:
   version: 2.2.7
 - name: purple_trader
   repository: file://../purple_trader
-  version: 1.0.1
-- name: trader
-  repository: file://../trader
-  version: 1.0.0
+  version: 1.0.2
+- name: blue_trader
+  repository: file://../blue_trader
+  version: 1.0.2
 - name: ingestion
   repository: file://../ingestion
   version: 0.3.0
-digest: sha256:917818a788779c40e4f2ebdc8bc8ed9883ffd33b8645da913a847a89b46c3672
-generated: "2021-08-24T16:06:27.049026-05:00"
+digest: sha256:0479257e4db9f33efebe9021a0ec6410e81504ecf491d51e316e32d860334da2
+generated: "2021-08-25T16:31:54.989352-05:00"

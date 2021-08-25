@@ -12,7 +12,7 @@ image:
   tag: latest
 
 imagePullSecrets: []
-nameOverride: ""
+nameOverride: "purple-trader"
 fullnameOverride: ""
 
 serviceAccount:
@@ -22,7 +22,7 @@ serviceAccount:
   annotations: {}
   # The name of the service account to use.
   # If not set and create is true, a name is generated using the fullname template
-  name: ""
+  name: "purple-trader"
 
 podAnnotations: {}
 

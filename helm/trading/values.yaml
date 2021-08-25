@@ -40,7 +40,12 @@ purple_trader:
         MR_BUY_FRACTION: "0.5"
         MR_SELL_FRACTION: "0.9"
 
-trader:
+
+blue_trader:
+    nameOverride: "blue-trader"
+    serviceAccount:
+        create: true
+        name: "blue-trader"
     coinbaseCredSecret: blue-trader-coinbase-creds
     influxDBSecret: trading-trader-influx-secret
     image:
@@ -51,6 +56,4 @@ trader:
     extraEnv:
         MR_EMA_PERIODS: "20"
         MR_BUY_FRACTION: "0.5"
-        MR_SELL_FRACTION: "0.857142"
-        MR_BUY_THRESHOLD: "0.001"
-        MR_SELL_THRESHOLD: "0.0005"
+        MR_SELL_FRACTION: "0.9"
