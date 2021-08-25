@@ -14,20 +14,8 @@ from indicators import TrailingVolume, TripleEMA, BidAsk, \
 from indicators.sliding_candles import CandleSticks
 from order_tracker.async_coinbase import AsyncCoinbaseTracker
 from settings import influx_db as influx_db_settings, \
-    coinbase as cb_settings, portfolio as portfolio_settings
-
-# STRATEGY PARAMETERS
-BUY_FRACTION_BASE = 1 / 2
-SELL_FRACTION_BASE = 8 / 9
-DEVIATION_THRESHOLD = 0.001
-
-TRADE_BUCKET = 'level1'
-
-TICKER_BUCKET = 'level1'
-
-FREQUENCY = timedelta(minutes=1)
-
-EMA_PERIODS = 20
+    coinbase as cb_settings, portfolio as portfolio_settings, \
+    mean_reversion as strategy_settings
 
 logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
                     level=logging.DEBUG)
@@ -36,12 +24,11 @@ logger = logging.getLogger(__name__)
 
 
 class MeanReversionBuy:
-    def __init__(self, db: InfluxDBClient, periods: int = EMA_PERIODS,
-                 frequency: timedelta = timedelta(minutes=1)):
-        self.threshold = DEVIATION_THRESHOLD
-        self.periods = periods
-        self.ema = TripleEMA(db, periods, frequency,
-                             portfolio_settings.QUOTE)
+    def __init__(self, threshold: float, base_buy_fraction: float,
+                 ema: TripleEMA):
+        self.base_buy_fraction = base_buy_fraction
+        self.threshold = threshold
+        self.ema = ema
 
     @property
     def periods_required(self) -> int:
@@ -55,19 +42,18 @@ class MeanReversionBuy:
         deviation = 1 - (prices / moving_averages)
         below = deviation > self.threshold
         adjustment = np.log(deviation[below] / self.threshold)
-        hold_fraction_base = 1. - BUY_FRACTION_BASE
+        hold_fraction_base = 1. - self.base_buy_fraction
         hold_fraction = hold_fraction_base ** adjustment
         buy_fraction = 1. - hold_fraction
         return (buy_fraction * volume_fraction)[below]
 
 
 class MeanReversionSell:
-    def __init__(self, db: InfluxDBClient, periods: int = EMA_PERIODS,
-                 frequency: timedelta = timedelta(minutes=1)):
-        self.threshold = DEVIATION_THRESHOLD
-        self.periods = periods
-        self.ema = TripleEMA(db, periods, frequency,
-                             portfolio_settings.QUOTE)
+    def __init__(self, threshold: float, base_sell_fraction: float,
+                 ema: TripleEMA):
+        self.base_sell_fraction = base_sell_fraction
+        self.threshold = threshold
+        self.ema = ema
 
     @property
     def periods_required(self) -> int:
@@ -78,7 +64,7 @@ class MeanReversionSell:
         moving_averages = self.ema.compute()
         deviations = prices / moving_averages - 1.
         above = deviations > self.threshold
-        hold_fraction_base = 1. - SELL_FRACTION_BASE
+        hold_fraction_base = 1. - self.base_sell_fraction
         # always >= 1.0
         acceleration = np.log(deviations[above] / self.threshold)
         # amount held geometrically decreases with the deviation
@@ -87,7 +73,7 @@ class MeanReversionSell:
 
 
 def main() -> None:
-    client = InfluxDBClient(influx_db_settings.INFLUX_URL,
+    influx = InfluxDBClient(influx_db_settings.INFLUX_URL,
                             influx_db_settings.INFLUX_TOKEN,
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
@@ -102,19 +88,25 @@ def main() -> None:
                                    api_secret=cb_settings.SECRET,
                                    api_passphrase=cb_settings.PASSPHRASE,
                                    ignore_untracked=False)
-    buy_indicator = MeanReversionBuy(client, periods=EMA_PERIODS,
-                                     frequency=FREQUENCY)
-    sell_indicator = MeanReversionSell(client, periods=EMA_PERIODS,
-                                       frequency=FREQUENCY)
+    ema = TripleEMA(influx, strategy_settings.EMA_PERIODS,
+                    strategy_settings.FREQUENCY,
+                    portfolio_settings.QUOTE)
+    buy_indicator = MeanReversionBuy(strategy_settings.BUY_THRESHOLD,
+                                     strategy_settings.BASE_BUY_FRACTION, ema)
+    sell_indicator = MeanReversionSell(strategy_settings.SELL_THRESHOLD,
+                                       strategy_settings.BASE_SELL_FRACTION,
+                                       ema)
     volume_indicator = TrailingVolume(periods=1)
     price_indicator = Ticker(periods=1)
-    bid_ask = BidAsk(client, period=timedelta(minutes=1), bucket=TICKER_BUCKET,
+    bid_ask = BidAsk(influx, period=timedelta(minutes=1),
+                     bucket=strategy_settings.TICKER_BUCKET,
                      quote=portfolio_settings.QUOTE)
     candle_periods = max(buy_indicator.periods_required,
                          sell_indicator.periods_required,
                          volume_indicator.periods_required, )
-    candles_src = CandleSticks(client, portfolio_settings.EXCHANGE,
-                               candle_periods, FREQUENCY, TRADE_BUCKET,
+    candles_src = CandleSticks(influx, portfolio_settings.EXCHANGE,
+                               candle_periods, strategy_settings.FREQUENCY,
+                               strategy_settings.TRADE_BUCKET,
                                portfolio_settings.QUOTE)
     manager = PortfolioManager(coinbase, candles_src,
                                buy_indicator=buy_indicator,

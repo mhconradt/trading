@@ -1,28 +1,28 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "trader.fullname" . }}
+  name: {{ include "purple_trader.fullname" . }}
   labels:
-    {{- include "trader.labels" . | nindent 4 }}
+  {{- include "purple_trader.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      {{- include "trader.selectorLabels" . | nindent 6 }}
+  {{- include "purple_trader.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "trader.selectorLabels" . | nindent 8 }}
+    {{- include "purple_trader.selectorLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
       {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "trader.serviceAccountName" . }}
+      serviceAccountName: {{ include "purple_trader.serviceAccountName" . }}
       securityContext:
       {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: {{ .Chart.Name }}
+        - name: "purple-trader"
           env:
             {{- if .Values.extraEnv }}
             {{- range $key, $value := .Values.extraEnv }}
@@ -40,16 +40,16 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+      {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
-        {{- toYaml . | nindent 8 }}
+      {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+      {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- toYaml . | nindent 8 }}
+  {{- end }}
