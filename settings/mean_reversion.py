@@ -1,0 +1,15 @@
+from datetime import timedelta
+
+from environs import Env
+
+env = Env()
+
+EMA_PERIODS = env.int("MR_EMA_PERIODS")
+BASE_BUY_FRACTION = env.float("MR_BUY_FRACTION")
+BASE_SELL_FRACTION = env.float("MR_SELL_FRACTION")
+
+BUY_THRESHOLD = env.float("MR_BUY_THRESHOLD", 0.001)
+SELL_THRESHOLD = env.float("MR_SELL_THRESHOLD", 0.001)
+TRADE_BUCKET = 'level1'
+TICKER_BUCKET = 'level1'
+FREQUENCY = timedelta(minutes=1)
