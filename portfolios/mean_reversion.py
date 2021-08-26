@@ -108,6 +108,8 @@ def main() -> None:
                                candle_periods, strategy_settings.FREQUENCY,
                                strategy_settings.TRADE_BUCKET,
                                portfolio_settings.QUOTE)
+    buy_horizon = timedelta(seconds=strategy_settings.BUY_TARGET_SECONDS)
+    sell_horizon = timedelta(seconds=strategy_settings.SELL_TARGET_SECONDS)
     manager = PortfolioManager(coinbase, candles_src,
                                buy_indicator=buy_indicator,
                                sell_indicator=sell_indicator,
@@ -119,8 +121,8 @@ def main() -> None:
                                liquidate_on_shutdown=False,
                                quote=portfolio_settings.QUOTE,
                                order_tracker=tracker, buy_order_type='limit',
-                               buy_target_horizon=timedelta(minutes=5),
-                               sell_target_horizon=timedelta(minutes=5),
+                               buy_target_horizon=buy_horizon,
+                               sell_target_horizon=sell_horizon,
                                buy_age_limit=timedelta(seconds=30),
                                sell_age_limit=timedelta(seconds=30),
                                post_only=True, sell_order_type='limit')
