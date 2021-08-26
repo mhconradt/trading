@@ -2,7 +2,7 @@ import typing as t
 from datetime import datetime, timedelta
 
 
-class VolatilityCoolDown:
+class CoolDown:
     def __init__(self, buy_period: timedelta = timedelta(0),
                  sell_period: timedelta = timedelta(0)):
         self.buy_period = buy_period
@@ -15,15 +15,14 @@ class VolatilityCoolDown:
         self.tick = tick
 
     def cooling_down(self, market: str) -> bool:
-        if market not in self.last_bought:
-            return False
-        since_bought = (self.tick - self.last_bought[market])
-        if since_bought < self.buy_period:
-            return True
-        if market not in self.last_sold:
-            return False
-        since_sold = (self.tick - self.last_sold[market])
-        return since_sold < self.sell_period
+        cooling_down = False
+        if market in self.last_bought:
+            since_bought = self.tick - self.last_bought[market]
+            cooling_down |= since_bought < self.buy_period
+        if market in self.last_sold:
+            since_sold = self.tick - self.last_sold[market]
+            cooling_down |= since_sold < self.sell_period
+        return cooling_down
 
     def sold(self, market: str) -> None:
         self.last_sold[market] = self.tick

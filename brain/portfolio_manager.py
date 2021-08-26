@@ -1,6 +1,5 @@
 import itertools as it
 import logging
-import random
 import time
 import typing as t
 from collections import defaultdict
@@ -12,6 +11,7 @@ import numpy as np
 import pandas as pd
 from pandas import DataFrame, Series
 
+from brain.cool_down import CoolDown
 from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             DesiredLimitSell, PendingLimitSell, Sold,
                             DesiredMarketSell,
@@ -19,7 +19,11 @@ from brain.position import (DesiredLimitBuy, PendingLimitBuy, ActivePosition,
                             PendingMarketBuy, DesiredMarketBuy,
                             Download, RootState)
 from brain.position_counter import PositionCounter
+from brain.position_sizing import limit_limit_buy_size, \
+    limit_market_buy_size, compute_sell_size, adjust_spending_target
+from brain.stop_loss import StopLoss
 from helper.coinbase import get_server_time, AuthenticatedClient
+from helper.functions import overlapping_labels, safely_decimalize
 from indicators.protocols import InstantIndicator, BidAskIndicator, \
     CandlesIndicator
 from order_tracker import OrderTracker
@@ -29,158 +33,56 @@ ORDER_WAIT_TIME = timedelta(seconds=1)
 logger = logging.getLogger(__name__)
 
 
-def overlapping_labels(a: pd.Series,
-                       b: pd.Series) -> t.Tuple[pd.Series, pd.Series]:
-    intersection = a.index.intersection(b.index)
-    return a.loc[intersection], b.loc[intersection]
-
-
-def apply_limit_size_limit(n: float, weights: pd.Series, prices: pd.Series,
-                           min_sizes: pd.Series) -> pd.Series:
-    total_weight = np.sum(weights)
-    sorted_weights = weights.sort_values(ascending=False)
-    max_above_limit, best_weights = 0, pd.Series([], dtype=np.float64)
-    for market in sorted_weights.index:
-        these_weights = sorted_weights.loc[:market]
-        these_weights = these_weights / these_weights.sum() * total_weight
-        these_amounts = these_weights * n
-        these_sizes = these_amounts / prices
-        these_sizes, min_sizes = overlapping_labels(these_sizes, min_sizes)
-        large_enough = these_sizes > min_sizes
-        these_amounts, large_enough = overlapping_labels(these_amounts,
-                                                         large_enough)
-        above_limit = these_amounts[large_enough]
-        if len(above_limit) > max_above_limit:
-            max_above_limit = len(above_limit)
-            best_weights = above_limit / above_limit.sum() * total_weight
-    return best_weights
-
-
-def apply_market_size_limit(n: float, weights: pd.Series,
-                            min_market_funds: pd.Series) -> pd.Series:
-    total_weight = np.sum(weights)
-    sorted_weights = weights.sort_values(ascending=False)
-    max_above_limit, best_weights = 0, pd.Series([], dtype=np.float64)
-    for market in sorted_weights.index:
-        these_weights = sorted_weights.loc[:market]
-        these_weights = these_weights / these_weights.sum() * total_weight
-        these_amounts = these_weights * n
-        these_amounts, min_market_funds = overlapping_labels(these_amounts,
-                                                             min_market_funds)
-        above_limit = these_amounts[these_amounts > min_market_funds]
-        if len(above_limit) > max_above_limit:
-            max_above_limit = len(above_limit)
-            best_weights = above_limit / above_limit.sum() * total_weight
-    return best_weights
-
-
-def compute_l1_sell_size(size: Decimal, fraction: Decimal,
-                         min_size: Decimal, increment: Decimal) -> Decimal:
-    """
-    Determine the size of the position to sell.
-    This size must satisfy the following requirements:
-        1. The size must obey exchange rules.
-    :param size: the position size
-    :param fraction: the desired fraction to sell
-    :param min_size: the minimum size for an order
-    :param increment: this is the minimum increment for order sizes.
-    :return: the size to sell.
-    """
-    desired_size = fraction * size
-    obeys_increment = desired_size.quantize(increment, rounding='ROUND_UP')
-    if obeys_increment < min_size:
-        # sell what you want in expectation
-        sell_probability = float(obeys_increment / min_size)
-        if random.random() < sell_probability:
-            return min_size
-        else:
-            return Decimal('0')
-    return obeys_increment
-
-
-def compute_sell_size(size: Decimal, fraction: Decimal,
-                      min_size: Decimal, increment: Decimal) -> Decimal:
-    """
-        Determine the size of the position to sell.
-        This size must satisfy the following requirements:
-            1. The size must obey exchange rules.
-            2. The size should ensure the remaining size can be sold.
-        :param size: the position size
-        :param fraction: the desired fraction to sell
-        :param min_size: the minimum size for an order
-        :param increment: this is the minimum increment for order sizes.
-        :return: the size to sell.
-    """
-    l1_sell_size = compute_l1_sell_size(size, fraction, min_size,
-                                        increment)
-    if (size - l1_sell_size) < min_size:
-        return size.quantize(increment, rounding='ROUND_DOWN')
-    else:
-        return l1_sell_size
-
-
-def safely_decimalize(s: pd.Series) -> pd.Series:
-    return s.map(Decimal).where(s.notna(), pd.NA)
-
-
-def adjust_spending_target(targets: pd.Series,
-                           over: pd.Series) -> pd.Series:
-    exp = 1 / over
-    weights = 1 - (1 - targets) ** exp
-    return weights.fillna(0.).map(Decimal)
-
-
-# PROBLEM: The tick time is coupled with the most recent message timestamp.
-
-
 class PortfolioManager:
-    def __init__(self, client: AuthenticatedClient,
+    def __init__(self, exchange_client: AuthenticatedClient,
                  candles_src: CandlesIndicator,
                  buy_indicator: InstantIndicator,
                  sell_indicator: InstantIndicator,
                  price_indicator: InstantIndicator,
                  volume_indicator: InstantIndicator,
                  bid_ask_indicator: BidAskIndicator,
-                 market_blacklist: t.Container[str],
+                 market_blacklist: t.Iterable[str],
                  liquidate_on_shutdown: bool, quote: str,
-                 order_tracker: OrderTracker, *, buy_order_type: str = 'limit',
-                 buy_target_horizon=timedelta(minutes=10),
+                 order_tracker: OrderTracker, cool_down: CoolDown,
+                 stop_loss: StopLoss, *,
                  sell_target_horizon=timedelta(minutes=5),
                  buy_time_in_force: str = 'GTC',
                  sell_time_in_force: str = 'GTC',
                  buy_age_limit=timedelta(minutes=1),
                  sell_age_limit=timedelta(minutes=1), post_only: bool = False,
-                 sell_order_type: str = 'limit'):
+                 sell_order_type: str = 'limit', buy_order_type: str = 'limit',
+                 buy_target_horizon=timedelta(minutes=10)):
+        # COINBASE CLIENT
+        self.exchange = exchange_client
+        # SPENDING DIRECTIVES
         self.quote = quote
         self.buy_target_horizon = buy_target_horizon
         self.sell_target_horizon = sell_target_horizon
-        self.initialized = False
-        self.post_only = post_only
-        self.client = client
+        self.blacklist = market_blacklist
+        # LEVEL1 INDICATORS
         self.candles_src = candles_src
         self.price_indicator = price_indicator
         self.volume_indicator = volume_indicator
         self.buy_indicator = buy_indicator
         self.sell_indicator = sell_indicator
         self.bid_ask_indicator = bid_ask_indicator
-        accounts = self.client.get_accounts()
-        self.quote_account_id = [account['id'] for account in accounts if
-                                 account['currency'] == self.quote][0]
+        # POSITION TRACKING
         self.tracker = order_tracker
+        self.counter = PositionCounter()  # Worthless except for catching bugs
+        # RISK MANAGEMENT
+        self.cool_down = cool_down
+        self.stop_loss = stop_loss
         self.pop_limit = Decimal('0.25')
         self.pov_limit = Decimal('1')
-
-        self.counter = PositionCounter()
-
-        self.buy_age_limit = buy_age_limit
-        self.sell_age_limit = sell_age_limit
-
         # TICK VARIABLES
         self.tick_time: t.Optional[datetime] = None
         self.order_snapshot_time: t.Optional[datetime] = None
         self.orders: t.Optional[t.Dict[str, dict]] = None
         self.portfolio_available_funds: t.Optional[Decimal] = None
-
+        # ORDER INSTRUCTIONS
+        self.post_only = post_only
+        self.buy_age_limit = buy_age_limit
+        self.sell_age_limit = sell_age_limit
         valid_order_types = {'limit', 'market'}
         if buy_order_type not in valid_order_types:
             raise ValueError(f"Invalid order type {buy_order_type}")
@@ -188,7 +90,7 @@ class PortfolioManager:
         if sell_order_type not in valid_order_types:
             raise ValueError(f"Invalid order type {sell_order_type}")
         self.sell_order_type = sell_order_type
-
+        # TIMES IN FORCE
         valid_times_in_force = {'FOK', 'GTC', 'IOC'}
         if buy_time_in_force not in valid_times_in_force:
             raise ValueError(f"Invalid time in force {buy_time_in_force}")
@@ -196,19 +98,20 @@ class PortfolioManager:
         if sell_time_in_force not in valid_times_in_force:
             raise ValueError(f"Invalid time in force {sell_time_in_force}")
         self.sell_time_in_force = sell_time_in_force
-
-        # all of these can be computed from candlesticks
+        # LEVEL1 / COMPUTED MARKET DATA
         self.prices: t.Optional[Series] = None
         self.bids: t.Optional[Series] = None
         self.asks: t.Optional[Series] = None
         self.volume: t.Optional[Series] = None
         self.buy_weights: t.Optional[Series] = None
         self.sell_weights: t.Optional[Series] = None
-
+        # (APPROXIMATELY) STATIC MARKET/PORTFOLIO DATA
+        accounts = self.exchange.get_accounts()
+        self.quote_account_id = [account['id'] for account in accounts if
+                                 account['currency'] == self.quote][0]
         self.market_info: t.Optional[t.Dict[str, dict]] = None
         self.taker_fee: t.Optional[Decimal] = None
         self.maker_fee: t.Optional[Decimal] = None
-
         # STATES
         self.desired_limit_buys: t.List[DesiredLimitBuy] = []
         self.desired_market_buys: t.List[DesiredMarketBuy] = []
@@ -220,11 +123,10 @@ class PortfolioManager:
         self.pending_limit_sells: t.List[PendingLimitSell] = []
         self.pending_market_sells: t.List[PendingMarketSell] = []
         self.sells: t.List[Sold] = []
-
-        self.blacklist = market_blacklist
-
+        # END/BEGINNING DIRECTIVES
         self.liquidate_on_shutdown = liquidate_on_shutdown
         self.stop = False
+        self.initialized = False
 
     @property
     def aum(self) -> Decimal:
@@ -293,27 +195,27 @@ class PortfolioManager:
 
     def apply_exchange_size_limits(self, weights: pd.Series,
                                    spending_limit: Decimal) -> pd.Series:
-        n = float(spending_limit)
+        spending_limit = float(spending_limit)
         weights = weights.map(float)
         if self.buy_order_type == 'market':
             min_market_funds = pd.Series(
                 {product: float(info['min_market_funds'])
                  for product, info in self.market_info.items()})
-            weights = apply_market_size_limit(n, weights, min_market_funds)
+            weights = limit_market_buy_size(spending_limit, weights,
+                                            min_market_funds)
         else:
             base_min_sizes = pd.Series(
                 {product: float(info['base_min_size'])
                  for product, info in self.market_info.items()})
-            weights = apply_limit_size_limit(n, weights,
-                                             self.bids.map(float),
-                                             base_min_sizes)
+            weights = limit_limit_buy_size(spending_limit, weights,
+                                           self.bids.map(float),
+                                           base_min_sizes)
         return weights.fillna(0.).map(Decimal)
 
     def limit_weights(self, target_weights: Series,
                       spending_limit: Decimal) -> Series:
         nil_weights = Series([], dtype=np.float64)
-        allowed = target_weights.index.difference(self.blacklist)
-        filtered_weights = target_weights.loc[allowed]
+        filtered_weights = self.filter_weights(target_weights)
         if not len(filtered_weights):
             return nil_weights
         limited_weights = self.apply_size_limits(filtered_weights,
@@ -325,6 +227,13 @@ class PortfolioManager:
                                                   spending_limit)
         logger.debug(weights)
         return weights
+
+    def filter_weights(self, target_weights):
+        overheated = filter(self.cool_down.cooling_down, target_weights.index)
+        not_allowed = set(overheated) | set(self.blacklist)
+        allowed = target_weights.index.difference(not_allowed)
+        filtered_weights = target_weights.loc[allowed]
+        return filtered_weights
 
     def queue_buys(self) -> None:
         """
@@ -396,9 +305,10 @@ class PortfolioManager:
                 continue
             max_funds = Decimal(info['max_market_funds'])
             funds = min(funds, max_funds)
-            order = self.client.place_market_order(market, side='buy',
-                                                   funds=str(funds),
-                                                   stp='cn')
+            order = self.exchange.place_market_order(market, side='buy',
+                                                     funds=str(funds),
+                                                     stp='cn')
+            self.cool_down.bought(market)
             if 'id' not in order:
                 logger.warning(order)
                 self.counter.decrement()
@@ -453,12 +363,13 @@ class PortfolioManager:
             size = min(size, max_size)
             post_only = self.post_only or info['post_only']
             tif = 'GTC' if post_only else self.buy_time_in_force
-            order = self.client.place_limit_order(market, side='buy',
-                                                  price=str(price),
-                                                  size=str(size),
-                                                  time_in_force=tif,
-                                                  post_only=post_only,
-                                                  stp='cn')
+            order = self.exchange.place_limit_order(market, side='buy',
+                                                    price=str(price),
+                                                    size=str(size),
+                                                    time_in_force=tif,
+                                                    post_only=post_only,
+                                                    stp='cn')
+            self.cool_down.bought(market)
             if 'id' not in order:
                 next_generation.append(buy)
                 logger.warning(f"Error placing buy order {order}")
@@ -509,7 +420,7 @@ class PortfolioManager:
                 server_age = self.tick_time - buy.created_at
                 time_limit_expired = server_age > self.buy_age_limit
                 if time_limit_expired:
-                    self.client.cancel_order(order_id)
+                    self.exchange.cancel_order(order_id)
                 next_generation.append(buy)
                 continue
             elif status == 'done':
@@ -621,15 +532,20 @@ class PortfolioManager:
             if position.size < min_size:
                 next_generation.append(position)
                 continue
-            if market not in self.prices:
+            if market not in self.asks:
                 next_generation.append(position)
                 continue
-            increment = Decimal(market_info['base_increment'])
-            sell_fraction = self.sell_weights.get(market, Decimal(0))
+            price = self.asks[market]
+            if self.stop_loss.trigger(price, position.price):
+                self.cool_down.sold(market)
+                sell_fraction = Decimal(1)
+            else:
+                sell_fraction = self.sell_weights.get(market, Decimal(0))
+            size_increment = Decimal(market_info['base_increment'])
             sell_size = compute_sell_size(position.size,
                                           sell_fraction,
                                           min_size,
-                                          increment)
+                                          size_increment)
             remainder = position.size - sell_size
             if sell_size:
                 if remainder:
@@ -683,10 +599,10 @@ class PortfolioManager:
                 continue
             exp = Decimal(self.market_info[sell.market]['base_increment'])
             size = sell.size.quantize(exp, rounding='ROUND_DOWN')
-            order = self.client.place_market_order(sell.market,
-                                                   side='sell',
-                                                   size=str(size),
-                                                   stp='dc')
+            order = self.exchange.place_market_order(sell.market,
+                                                     side='sell',
+                                                     size=str(size),
+                                                     stp='dc')
             if 'id' not in order:
                 logger.warning(f"Error placing order {order} {sell}")
                 continue
@@ -799,7 +715,7 @@ class PortfolioManager:
                           time_in_force=tif,
                           post_only=post_only,
                           stp='co')
-            order = self.client.place_limit_order(**kwargs)
+            order = self.exchange.place_limit_order(**kwargs)
             if 'id' not in order:
                 # this means the market moved up
                 if order.get('message') == 'Post only mode':
@@ -859,7 +775,7 @@ class PortfolioManager:
                 server_age = self.tick_time - sell.created_at
                 time_limit_expired = server_age > self.sell_age_limit
                 if time_limit_expired:
-                    self.client.cancel_order(order_id)
+                    self.exchange.cancel_order(order_id)
                 next_generation.append(sell)
                 continue
             elif status == 'done':
@@ -909,6 +825,7 @@ class PortfolioManager:
         self.prices = safely_decimalize(prices)
         self.order_snapshot_time, self.orders = self.tracker.barrier_snapshot()
         self.tick_time, last_tick_time = get_server_time(), self.tick_time
+        self.cool_down.set_tick(self.tick_time)
         buy_targets = self.buy_indicator.compute(candles)
         sell_targets = self.sell_indicator.compute(candles)
         if last_tick_time:
@@ -935,31 +852,31 @@ class PortfolioManager:
 
     def set_market_info(self) -> None:
         self.market_info = {product['id']: product for product in
-                            self.client.get_products()}
+                            self.exchange.get_products()}
 
     def set_fee(self) -> None:
-        fee_info = self.client.get_fees()
+        fee_info = self.exchange.get_fees()
         self.taker_fee = Decimal(fee_info['taker_fee_rate'])
         self.maker_fee = Decimal(fee_info['maker_fee_rate'])
 
     def set_portfolio_available_funds(self) -> None:
-        quote_account = self.client.get_account(self.quote_account_id)
+        quote_account = self.exchange.get_account(self.quote_account_id)
         self.portfolio_available_funds = Decimal(quote_account['available'])
 
     def liquidate(self) -> None:
-        for account in self.client.get_accounts():
+        for account in self.exchange.get_accounts():
             if account['currency'] == self.quote:
                 continue
             if not Decimal(account['available']):
                 continue
             market = f"{account['currency']}-{self.quote}"
-            self.client.place_market_order(market,
-                                           side='sell',
-                                           size=account['available'])
+            self.exchange.place_market_order(market,
+                                             side='sell',
+                                             size=account['available'])
 
     def shutdown(self) -> None:
         logger.info(f"Shutting down...")
-        self.client.cancel_all()
+        self.exchange.cancel_all()
         if self.liquidate_on_shutdown:
             self.liquidate()
         self.stop = True
@@ -969,17 +886,20 @@ class PortfolioManager:
         n = 15
         logger.info(f"Waiting {n} seconds to start trading...")
         time.sleep(n)
-        self.client.cancel_all()
+        self.exchange.cancel_all()
         self.initialize_active_positions()
         self.initialized = True
 
     def initialize_active_positions(self) -> None:
         positions: t.List[ActivePosition] = []
-        for account in self.client.get_accounts():
+        for account in self.exchange.get_accounts():
             if account['currency'] == self.quote:
                 continue
             market = f"{account['currency']}-{self.quote}"
             if market not in self.market_info:
+                continue
+            # This could allow ring-fencing
+            if market in self.blacklist:
                 continue
             balance = Decimal(account['balance'])
             if balance < Decimal(self.market_info[market]['base_min_size']):

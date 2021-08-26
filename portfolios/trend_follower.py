@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
+from brain.cool_down import CoolDown
 from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
-from brain.volatility_cooldown import VolatilityCoolDown
 from helper.coinbase import AuthenticatedClient
 from indicators import Ticker, TrailingVolume, TrendAcceleration, \
     TrendStability, Momentum, BidAsk
@@ -87,9 +87,8 @@ def main() -> None:
                                    passphrase=coinbase_settings.PASSPHRASE,
                                    api_url=coinbase_settings.API_URL)
     tracker = SyncCoinbaseTracker(coinbase)
-    stop_loss = SimpleStopLoss(take_profit=portfolio_settings.TAKE_PROFIT,
-                               stop_loss=portfolio_settings.STOP_LOSS)
-    cool_down = VolatilityCoolDown(buy_period=timedelta(minutes=0))
+    cool_down = CoolDown(sell_period=timedelta(hours=1))
+    stop_loss = SimpleStopLoss(stop_loss=portfolio_settings.STOP_LOSS)
     buy_indicator = BuyIndicator(A, B)
     sell_indicator = SellIndicator(A, B)
     volume_indicator = TrailingVolume(periods=A + B)
@@ -112,8 +111,9 @@ def main() -> None:
                                market_blacklist={'USDT-USD', 'DAI-USD'},
                                liquidate_on_shutdown=True,
                                quote=portfolio_settings.QUOTE,
-                               order_tracker=tracker, buy_order_type='market',
-                               sell_order_type='market')
+                               order_tracker=tracker, cool_down=cool_down,
+                               stop_loss=stop_loss, sell_order_type='market',
+                               buy_order_type='market')
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()

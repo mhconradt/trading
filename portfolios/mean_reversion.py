@@ -7,7 +7,9 @@ import numpy as np
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
+from brain.cool_down import CoolDown
 from brain.portfolio_manager import PortfolioManager
+from brain.stop_loss import SimpleStopLoss
 from helper.coinbase import AuthenticatedClient
 from indicators import TrailingVolume, TripleEMA, BidAsk, \
     Ticker
@@ -110,6 +112,9 @@ def main() -> None:
                                portfolio_settings.QUOTE)
     buy_horizon = timedelta(seconds=strategy_settings.BUY_TARGET_SECONDS)
     sell_horizon = timedelta(seconds=strategy_settings.SELL_TARGET_SECONDS)
+    # The idea here is to stop trading something after hitting the stop loss
+    cool_down = CoolDown(sell_period=timedelta(hours=1))
+    stop_loss = SimpleStopLoss(stop_loss=portfolio_settings.STOP_LOSS)
     manager = PortfolioManager(coinbase, candles_src,
                                buy_indicator=buy_indicator,
                                sell_indicator=sell_indicator,
@@ -120,12 +125,14 @@ def main() -> None:
                                                  'CLV-USD', 'PAX-USD'},
                                liquidate_on_shutdown=False,
                                quote=portfolio_settings.QUOTE,
-                               order_tracker=tracker, buy_order_type='limit',
-                               buy_target_horizon=buy_horizon,
+                               order_tracker=tracker, cool_down=cool_down,
+                               stop_loss=stop_loss,
                                sell_target_horizon=sell_horizon,
                                buy_age_limit=timedelta(seconds=30),
                                sell_age_limit=timedelta(seconds=30),
-                               post_only=True, sell_order_type='limit')
+                               post_only=True, sell_order_type='limit',
+                               buy_order_type='limit',
+                               buy_target_horizon=buy_horizon)
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()
