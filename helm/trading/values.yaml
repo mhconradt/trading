@@ -38,7 +38,7 @@ purple_trader:
     extraEnv:
         MR_EMA_PERIODS: "20"
         MR_BUY_FRACTION: "0.5"
-        MR_SELL_FRACTION: "0.9"
+        MR_SELL_FRACTION: "0.8333"
 
 
 blue_trader:
@@ -54,6 +54,6 @@ blue_trader:
         # Overrides the image tag whose default is the chart appVersion.
         tag: "1.8.1"
     extraEnv:
-        MR_EMA_PERIODS: "20"
+        MR_EMA_PERIODS: "26"
         MR_BUY_FRACTION: "0.5"
-        MR_SELL_FRACTION: "0.9"
+        MR_SELL_FRACTION: "0.875"

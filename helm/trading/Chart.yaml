@@ -2,17 +2,17 @@ apiVersion: v2
 name: trading
 description: A Helm chart for an algorithmic trading system
 type: application
-version: 2.0.16
+version: 2.0.23
 appVersion: 1.8.1
 dependencies:
   - name: influxdb
     version: 2.2.7
     repository: https://charts.bitnami.com/bitnami
   - name: purple_trader
-    version: 1.0.2
+    version: 1.0.5
     repository: file://../purple_trader
   - name: blue_trader
-    version: 1.0.2
+    version: 1.0.5
     repository: file://../blue_trader
   - name: ingestion
     version: 0.3.0

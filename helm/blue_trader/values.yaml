@@ -12,7 +12,7 @@ image:
   tag: latest
 
 imagePullSecrets: []
-nameOverride: ""
+nameOverride: "blue-trader"
 fullnameOverride: ""
 
 serviceAccount:

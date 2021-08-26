@@ -1,4 +1,4 @@
-{{- define "libtrader.deployment.tpl" -}}
+{{- define "libtrader.deployment" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,6 +12,8 @@ spec:
   {{- include "libtrader.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/extraEnv: {{ .Values.extraEnv | toYaml | sha256sum }}
       labels:
     {{- include "libtrader.selectorLabels" . | nindent 8 }}
     spec:

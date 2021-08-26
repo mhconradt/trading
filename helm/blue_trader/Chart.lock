@@ -1,0 +1,6 @@
+dependencies:
+- name: libtrader
+  repository: file://../libtrader
+  version: 0.1.3
+digest: sha256:397c66f565f0e0213896bc702352cb0fed67db15b434c053cb1ba503d780ede6
+generated: "2021-08-25T21:10:13.179109-05:00"
