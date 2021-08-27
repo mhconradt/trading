@@ -37,14 +37,15 @@ purple_trader:
     extraEnv:
         MR_EMA_PERIODS: "26"
         MR_BUY_FRACTION: "0.5"
-        MR_SELL_FRACTION: "0.8333"
-
+        MR_SELL_FRACTION: "0.8888"
+        STOP_LOSS: "0.995"
 
 blue_trader:
     extraEnv:
         MR_EMA_PERIODS: "26"
         MR_BUY_FRACTION: "0.5"
         MR_SELL_FRACTION: "0.875"
+        STOP_LOSS: "0.995"
     nameOverride: "blue-trader"
     serviceAccount:
         create: true
