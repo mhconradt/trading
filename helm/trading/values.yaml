@@ -33,11 +33,11 @@ purple_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "1.8.2"
+        tag: "1.8.3"
     extraEnv:
         MR_EMA_PERIODS: "26"
         MR_BUY_FRACTION: "0.5"
-        MR_SELL_FRACTION: "0.8888"
+        MR_SELL_FRACTION: "0.888"
         STOP_LOSS: "0.995"
 
 blue_trader:
@@ -55,4 +55,4 @@ blue_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "1.8.2"
+        tag: "1.8.3"

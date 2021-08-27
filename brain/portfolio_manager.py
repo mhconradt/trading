@@ -536,7 +536,8 @@ class PortfolioManager:
                 next_generation.append(position)
                 continue
             price = self.asks[market]
-            if self.stop_loss.trigger(price, position.price):
+            stop_sale = self.stop_loss.trigger(price, position.price)
+            if stop_sale:
                 self.cool_down.sold(market)
                 sell_fraction = Decimal(1)
             else:
@@ -556,14 +557,16 @@ class PortfolioManager:
                     sell = DesiredLimitSell(size=sell_size,
                                             market=market,
                                             previous_state=position,
-                                            state_change=state_change)
+                                            state_change=state_change,
+                                            stop_sale=stop_sale)
                     logger.debug(sell)
                     self.desired_limit_sells.append(sell)
                 else:
                     sell = DesiredMarketSell(size=sell_size,
                                              market=market,
                                              previous_state=position,
-                                             state_change=state_change)
+                                             state_change=state_change,
+                                             stop_sale=stop_sale)
                     logger.debug(sell)
                     self.desired_market_sells.append(sell)
             if remainder == position.size:
@@ -593,7 +596,8 @@ class PortfolioManager:
                 limit_sell = DesiredLimitSell(size=sell.size,
                                               market=sell.market,
                                               previous_state=sell,
-                                              state_change=transition, )
+                                              state_change=transition,
+                                              stop_sale=sell.stop_sale)
                 logger.debug(limit_sell)
                 self.desired_limit_sells.append(limit_sell)
                 continue
@@ -614,7 +618,8 @@ class PortfolioManager:
                                              order_id=order_id,
                                              created_at=created_at,
                                              previous_state=sell,
-                                             state_change='order created')
+                                             state_change='order created',
+                                             stop_sale=sell.stop_sale)
             logger.debug(pending_sell)
             self.pending_market_sells.append(pending_sell)
         self.desired_market_sells = next_generation
@@ -634,7 +639,8 @@ class PortfolioManager:
                 desired_sell = DesiredMarketSell(market=sell.market,
                                                  size=sell.size,
                                                  previous_state=sell,
-                                                 state_change='ext. canceled')
+                                                 state_change='ext. canceled',
+                                                 stop_sale=sell.stop_sale)
                 logger.debug(desired_sell)
                 self.desired_market_sells.append(desired_sell)
                 continue
@@ -667,7 +673,8 @@ class PortfolioManager:
                     desired_sell = DesiredMarketSell(market=sell.market,
                                                      size=remainder,
                                                      previous_state=sell,
-                                                     state_change=transition)
+                                                     state_change=transition,
+                                                     stop_sale=sell.stop_sale)
                     logger.debug(desired_sell)
                     self.desired_market_sells.append(desired_sell)
             else:
@@ -685,7 +692,7 @@ class PortfolioManager:
             market_info = self.market_info[sell.market]
             backing_off = self.sell_weights.get(sell.market, 0.) <= 0.
             size_too_small = sell.size < Decimal(market_info['base_min_size'])
-            if backing_off or size_too_small:
+            if (backing_off and not sell.stop_sale) or size_too_small:
                 state_change = 'backed off' if backing_off else 'too small'
                 position = ActivePosition(
                     market=sell.market,
@@ -741,7 +748,8 @@ class PortfolioManager:
                                             order_id=order_id,
                                             created_at=created_at,
                                             previous_state=sell,
-                                            state_change='order placed')
+                                            state_change='order placed',
+                                            stop_sale=sell.stop_sale)
             logger.debug(pending_sell)
             self.pending_limit_sells.append(pending_sell)
         self.desired_limit_sells = next_generation
@@ -765,7 +773,8 @@ class PortfolioManager:
                 desired_sell = DesiredLimitSell(market=sell.market,
                                                 size=sell.size,
                                                 previous_state=sell,
-                                                state_change='canceled')
+                                                state_change='canceled',
+                                                stop_sale=sell.stop_sale)
                 logger.debug(desired_sell)
                 self.desired_limit_sells.append(desired_sell)
                 continue
@@ -801,7 +810,8 @@ class PortfolioManager:
                     desired_sell = DesiredLimitSell(market=sell.market,
                                                     size=remainder,
                                                     previous_state=sell,
-                                                    state_change='canceled')
+                                                    state_change='canceled',
+                                                    stop_sale=sell.stop_sale)
                     logger.debug(desired_sell)
                     self.desired_limit_sells.append(desired_sell)
             else:

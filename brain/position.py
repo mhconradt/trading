@@ -191,6 +191,7 @@ class DesiredMarketSell(PositionState):
 
     size: Decimal
     market: str
+    stop_sale: bool
     state_slug: str = 'desired_market_sell'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
@@ -208,6 +209,7 @@ class PendingMarketSell(PositionState):
     order_id: str
     created_at: datetime
     market: str
+    stop_sale: bool
     state_slug: str = 'pending_market_sell'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
@@ -222,6 +224,7 @@ class DesiredLimitSell(PositionState):
 
     size: Decimal
     market: str
+    stop_sale: bool
     state_slug: str = 'desired_limit_sell'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
@@ -240,21 +243,8 @@ class PendingLimitSell(PositionState):
     order_id: str
     created_at: datetime
     market: str
+    stop_sale: bool
     state_slug: str = 'pending_limit_sell'
-
-    state_change: t.Optional[str] = field(default=None, repr=False)
-    previous_state: t.Optional[PositionState] = field(default=None, repr=False)
-
-
-@dataclass
-class PendingCancelLimitSell(PositionState):
-    price: Decimal
-    size: Decimal
-
-    order_id: str
-    created_at: datetime
-    market: str
-    state_slug: str = 'pending_cancel_limit_sell'
 
     state_change: t.Optional[str] = field(default=None, repr=False)
     previous_state: t.Optional[PositionState] = field(default=None, repr=False)
@@ -278,7 +268,7 @@ class Sold(PositionState):
 
 __all__ = ['DesiredMarketSell', 'DesiredLimitBuy', 'DesiredLimitSell',
            'RootState', 'PendingCancelBuy', 'PendingLimitSell',
-           'PendingMarketSell', 'PendingLimitBuy', 'PendingCancelLimitSell',
+           'PendingMarketSell', 'PendingLimitBuy',
            'Sold', 'PositionState', 'ActivePosition', 'Download',
            'PendingMarketBuy', 'DesiredMarketBuy']
 
