@@ -51,7 +51,8 @@ class PortfolioManager:
                  buy_age_limit=timedelta(minutes=1),
                  sell_age_limit=timedelta(minutes=1), post_only: bool = False,
                  sell_order_type: str = 'limit', buy_order_type: str = 'limit',
-                 buy_target_horizon=timedelta(minutes=10)):
+                 buy_target_horizon=timedelta(minutes=10),
+                 min_tick_time: float = 0.):
         # COINBASE CLIENT
         self.exchange = exchange_client
         # SPENDING DIRECTIVES
@@ -123,10 +124,11 @@ class PortfolioManager:
         self.pending_limit_sells: t.List[PendingLimitSell] = []
         self.pending_market_sells: t.List[PendingMarketSell] = []
         self.sells: t.List[Sold] = []
-        # END/BEGINNING DIRECTIVES
+        # CONTROL FLOW DIRECTIVES
         self.liquidate_on_shutdown = liquidate_on_shutdown
         self.stop = False
         self.initialized = False
+        self.min_tick_time = min_tick_time
 
     @property
     def aum(self) -> Decimal:
@@ -935,7 +937,10 @@ class PortfolioManager:
             if not self.initialized:
                 self.initialize()
             self.manage_positions()
-            logger.info(f"Tick took {time.time() - iteration_start:.1f}s")
+            tick_duration = time.time() - iteration_start
+            logger.info(f"Tick took {tick_duration :.1f}s")
+            wait = max(0., self.min_tick_time - tick_duration)
+            time.sleep(wait)
 
     def manage_positions(self):
         start = time.time()

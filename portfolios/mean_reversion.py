@@ -132,7 +132,8 @@ def main() -> None:
                                sell_age_limit=timedelta(seconds=30),
                                post_only=True, sell_order_type='limit',
                                buy_order_type='limit',
-                               buy_target_horizon=buy_horizon)
+                               buy_target_horizon=buy_horizon,
+                               min_tick_time=portfolio_settings.MIN_TICK_TIME)
     signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
     try:
         manager.run()
