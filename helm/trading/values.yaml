@@ -21,7 +21,7 @@ ingestion:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trade-ingestion
         pullPolicy: Always
         # Overrides the image tag whose default is the chart appVersion.
-        tag: "1.8.1"
+        tag: "1.8.6"
 
 purple_trader:
     nameOverride: "purple-trader"
@@ -33,11 +33,13 @@ purple_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "1.8.3"
+        tag: "1.8.6"
     extraEnv:
         MR_EMA_PERIODS: "26"
-        MR_BUY_FRACTION: "0.5"
+        MR_BUY_FRACTION: "0.75"
         MR_SELL_FRACTION: "0.888"
+        MR_BUY_THRESHOLD: "0.002"
+        MR_SELL_THRESHOLD: "0.001"
         STOP_LOSS: "0.995"
 
 blue_trader:
@@ -45,6 +47,8 @@ blue_trader:
         MR_EMA_PERIODS: "26"
         MR_BUY_FRACTION: "0.5"
         MR_SELL_FRACTION: "0.875"
+        MR_BUY_THRESHOLD: "0.001"
+        MR_SELL_THRESHOLD: "0.001"
         STOP_LOSS: "0.995"
     nameOverride: "blue-trader"
     serviceAccount:
@@ -55,4 +59,24 @@ blue_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "1.8.3"
+        tag: "1.8.6"
+
+
+red_trader:
+    extraEnv:
+        MR_EMA_PERIODS: "26"
+        MR_BUY_FRACTION: "0.666"
+        MR_SELL_FRACTION: "0.9"
+        MR_BUY_THRESHOLD: "0.0015"
+        MR_SELL_THRESHOLD: "0.0015"
+        STOP_LOSS: "0.995"
+    nameOverride: "red-trader"
+    serviceAccount:
+        create: true
+        name: "red-trader"
+    coinbaseCredSecret: red-trader-coinbase-creds
+    influxDBSecret: trading-trader-influx-secret
+    image:
+        repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
+        pullPolicy: Always
+        tag: "1.8.6"
