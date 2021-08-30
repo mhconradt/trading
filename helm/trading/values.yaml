@@ -36,8 +36,8 @@ purple_trader:
         tag: "1.8.6"
     extraEnv:
         MR_EMA_PERIODS: "26"
-        MR_BUY_FRACTION: "0.75"
-        MR_SELL_FRACTION: "0.888"
+        MR_BUY_FRACTION: "0.875"
+        MR_SELL_FRACTION: "0.875"
         MR_BUY_THRESHOLD: "0.002"
         MR_SELL_THRESHOLD: "0.001"
         STOP_LOSS: "0.995"
@@ -45,7 +45,7 @@ purple_trader:
 blue_trader:
     extraEnv:
         MR_EMA_PERIODS: "26"
-        MR_BUY_FRACTION: "0.5"
+        MR_BUY_FRACTION: "0.63"
         MR_SELL_FRACTION: "0.875"
         MR_BUY_THRESHOLD: "0.001"
         MR_SELL_THRESHOLD: "0.001"
@@ -65,11 +65,12 @@ blue_trader:
 red_trader:
     extraEnv:
         MR_EMA_PERIODS: "26"
-        MR_BUY_FRACTION: "0.666"
-        MR_SELL_FRACTION: "0.9"
-        MR_BUY_THRESHOLD: "0.0015"
-        MR_SELL_THRESHOLD: "0.0015"
+        MR_BUY_FRACTION: "0.63"
+        MR_SELL_FRACTION: "0.875"
+        MR_BUY_THRESHOLD: "0.001"
+        MR_SELL_THRESHOLD: "0.001"
         STOP_LOSS: "0.995"
+        QUOTE: "USDC"
     nameOverride: "red-trader"
     serviceAccount:
         create: true

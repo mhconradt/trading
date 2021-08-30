@@ -2,7 +2,7 @@ apiVersion: v2
 name: trading
 description: A Helm chart for an algorithmic trading system
 type: application
-version: 2.1.8
+version: 2.1.9
 appVersion: 1.8.6
 dependencies:
   - name: influxdb
