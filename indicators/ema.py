@@ -5,6 +5,8 @@ from datetime import timedelta
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
+from helper.ttl_cache import ttl_cache
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,6 +18,7 @@ class TripleEMA:
         self.frequency = frequency
         self.quote = quote
 
+    @ttl_cache(ttl=5)
     def compute(self) -> pd.Series:
         _start = time.time()
         calculation_periods = 3 * self.periods - 2
@@ -52,28 +55,16 @@ def main():
     import time
     from datetime import timedelta
 
-    from indicators.sliding_candles import CandleSticks
     from settings import influx_db as influx_db_settings
     _influx = InfluxDBClient(influx_db_settings.INFLUX_URL,
                              influx_db_settings.INFLUX_TOKEN,
                              org_id=influx_db_settings.INFLUX_ORG_ID,
                              org=influx_db_settings.INFLUX_ORG)
     ema = TripleEMA(_influx, 26, timedelta(minutes=1), 'USD')
-    candles = CandleSticks(_influx, 'coinbasepro', 5, timedelta(minutes=1),
-                           'level1', 'USD')
     while True:
         try:
             _start = time.time()
-            candle_values = candles.compute()
-            prices = candle_values.close.unstack('market').iloc[-1]
             values = ema.compute()
-            deviations = (prices - values) / values
-            print(deviations.describe())
-            print(f"{deviations.idxmin()}: {deviations.min()}")
-            print(f"{deviations.idxmax()}: {deviations.max()}")
-            quote_volume = candle_values.quote_volume.unstack('market').sum()
-            top_markets = quote_volume.sort_values(ascending=False).index[:10]
-            print(deviations[top_markets])
             print(f"Took {time.time() - _start:.2f}s")
         except (Exception,):
             pass
