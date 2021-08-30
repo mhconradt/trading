@@ -230,7 +230,7 @@ class PortfolioManager:
         logger.debug(weights)
         return weights
 
-    def filter_weights(self, target_weights):
+    def filter_weights(self, target_weights: pd.Series) -> pd.Series:
         overheated = filter(self.cool_down.cooling_down, target_weights.index)
         not_allowed = set(overheated) | set(self.blacklist)
         allowed = target_weights.index.difference(not_allowed)
