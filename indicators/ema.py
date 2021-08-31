@@ -18,7 +18,7 @@ class TripleEMA:
         self.frequency = frequency
         self.quote = quote
 
-    @ttl_cache(ttl=5)
+    @ttl_cache(ttl=11.)
     def compute(self) -> pd.Series:
         _start = time.time()
         calculation_periods = 3 * self.periods - 2
