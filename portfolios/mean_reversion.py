@@ -113,7 +113,7 @@ def main() -> None:
     buy_horizon = timedelta(seconds=strategy_settings.BUY_TARGET_SECONDS)
     sell_horizon = timedelta(seconds=strategy_settings.SELL_TARGET_SECONDS)
     # The idea here is to stop trading something after hitting the stop loss
-    cool_down = CoolDown(sell_period=timedelta(hours=1))
+    cool_down = CoolDown(sell_period=portfolio_settings.STOP_LOSS_COOLDOWN)
     stop_loss = SimpleStopLoss(stop_loss=portfolio_settings.STOP_LOSS)
     manager = PortfolioManager(coinbase, candles_src,
                                buy_indicator=buy_indicator,

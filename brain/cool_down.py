@@ -1,8 +1,5 @@
-import logging
 import typing as t
 from datetime import datetime, timedelta
-
-logger = logging.getLogger(__name__)
 
 
 class CoolDown:
@@ -15,20 +12,17 @@ class CoolDown:
         self.tick: t.Optional[datetime] = None
 
     def set_tick(self, tick: datetime) -> None:
-        markets = {*self.last_sold, *self.last_bought}
-        remaining = {market: self.cooling_down(market) for market in markets}
-        remaining = {market: period
-                     for market, period in remaining.items() if period}
-        logger.debug(f"Cooling down: {remaining}")
         self.tick = tick
 
-    def cooling_down(self, market: str) -> timedelta:
-        remainder = timedelta(0)
-        since_sold = self.tick - self.last_sold.get(market, self.tick)
-        remainder = max(remainder, since_sold)
-        since_bought = self.tick - self.last_bought.get(market, self.tick)
-        remainder = max(remainder, since_bought)
-        return remainder
+    def cooling_down(self, market: str) -> bool:
+        cooling_down = False
+        if market in self.last_bought:
+            since_bought = self.tick - self.last_bought[market]
+            cooling_down |= since_bought < self.buy_period
+        if market in self.last_sold:
+            since_sold = self.tick - self.last_sold[market]
+            cooling_down |= since_sold < self.sell_period
+        return cooling_down
 
     def sold(self, market: str) -> None:
         self.last_sold[market] = self.tick
