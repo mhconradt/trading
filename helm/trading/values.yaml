@@ -21,7 +21,7 @@ ingestion:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trade-ingestion
         pullPolicy: Always
         # Overrides the image tag whose default is the chart appVersion.
-        tag: "1.8.12"
+        tag: "1.8.13"
 
 purple_trader:
     nameOverride: "purple-trader"
@@ -33,15 +33,17 @@ purple_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "1.8.12"
+        tag: "1.8.13"
     extraEnv:
-        MR_EMA_PERIODS: "26"
-        MR_BUY_FRACTION: "0.9"
-        MR_SELL_FRACTION: "0.9"
-        MR_BUY_THRESHOLD: "0.002"
+        MR_EMA_PERIODS: "20"
+        MR_BUY_FRACTION: "0.5"
+        MR_SELL_FRACTION: "0.875"
+        MR_BUY_THRESHOLD: "0.001"
         MR_SELL_THRESHOLD: "0.001"
         STOP_LOSS: "0.99"
-        COOLDOWN_SECONDS: 1800
+        COOLDOWN_SECONDS: 2700
+        BUY_TARGET_SECONDS: 180
+        SELL_TARGET_SECONDS: 180
 
 blue_trader:
     nameOverride: "blue-trader"
@@ -53,26 +55,29 @@ blue_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "1.8.12"
+        tag: "1.8.13"
     extraEnv:
         MR_EMA_PERIODS: "26"
-        MR_BUY_FRACTION: "0.9"
-        MR_SELL_FRACTION: "0.75"
-        MR_BUY_THRESHOLD: "0.002"
-        MR_SELL_THRESHOLD: "0.0005"
+        MR_BUY_FRACTION: "0.5"
+        MR_SELL_FRACTION: "0.875"
+        MR_BUY_THRESHOLD: "0.001"
+        MR_SELL_THRESHOLD: "0.001"
         STOP_LOSS: "0.99"
-        COOLDOWN_SECONDS: 1800
-
+        COOLDOWN_SECONDS: 3600
+        BUY_TARGET_SECONDS: 300
+        SELL_TARGET_SECONDS: 300
 
 red_trader:
     extraEnv:
-        MR_EMA_PERIODS: "26"
-        MR_BUY_FRACTION: "0.9"
-        MR_SELL_FRACTION: "0.8"
-        MR_BUY_THRESHOLD: "0.002"
-        MR_SELL_THRESHOLD: "0.0005"
+        MR_EMA_PERIODS: "36"
+        MR_BUY_FRACTION: "0.5"
+        MR_SELL_FRACTION: "0.875"
+        MR_BUY_THRESHOLD: "0.001"
+        MR_SELL_THRESHOLD: "0.001"
         STOP_LOSS: "0.99"
-        COOLDOWN_SECONDS: 1800
+        COOLDOWN_SECONDS: 7200
+        BUY_TARGET_SECONDS: 600
+        SELL_TARGET_SECONDS: 600
     nameOverride: "red-trader"
     serviceAccount:
         create: true
@@ -82,4 +87,4 @@ red_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "1.8.12"
+        tag: "1.8.13"

@@ -73,7 +73,7 @@ class PortfolioManager:
         # RISK MANAGEMENT
         self.cool_down = cool_down
         self.stop_loss = stop_loss
-        self.pop_limit = Decimal('0.25')
+        self.pop_limit = Decimal('0.2')
         self.pov_limit = Decimal('1')
         # TICK VARIABLES
         self.tick_time: t.Optional[datetime] = None
