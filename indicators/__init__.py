@@ -1,4 +1,5 @@
 from .acceleration import TrendAcceleration
+from .atr import ATR
 from .bid_ask import BidAsk
 from .candles import CandleSticks
 from .ema import TripleEMA

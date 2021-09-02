@@ -81,9 +81,8 @@ def main():
                                    influx_db_settings.INFLUX_TOKEN,
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG)
-    src = CandleSticks(influx_client, 'coinbasepro', 5,
-                       frequency=timedelta(minutes=1), bucket='level1',
-                       quote='USD')
+    src = CandleSticks(influx_client, 5, frequency=timedelta(minutes=1),
+                       bucket='level1', quote='USD')
     qv = TrailingQuoteVolume(5)
     splits = SplitQuoteVolume(influx_client, 5, timedelta(minutes=1), 'level1',
                               'USD')

@@ -7,11 +7,10 @@ from exceptions import StaleDataException
 
 
 class CandleSticks:
-    def __init__(self, db: InfluxDBClient, exchange: str, periods: int,
-                 frequency: timedelta, quote: str):
+    def __init__(self, db: InfluxDBClient, periods: int, frequency: timedelta,
+                 quote: str):
         self.db = db
         self.frequency = frequency
-        self.exchange = exchange
         self.periods = periods
         self.quote = quote
 
@@ -19,8 +18,7 @@ class CandleSticks:
         query_api = self.db.query_api()
         lag_toleration = timedelta(seconds=15)
         start = -(self.periods + 1) * self.frequency + lag_toleration
-        parameters = {'exchange': self.exchange,
-                      'freq': self.frequency,
+        parameters = {'freq': self.frequency,
                       'start': start,
                       'quote': self.quote}
         df = query_api.query_data_frame("""
@@ -30,7 +28,6 @@ class CandleSticks:
             |> range(start: start)
             |> filter(fn: (r) => r["_measurement"] == measurement)
             |> filter(fn: (r) => r["quote"] == quote)
-            |> filter(fn: (r) => r["exchange"] == exchange)
             |> pivot(rowKey: ["market", "_time"], 
                      columnKey: ["_field"], 
                      valueColumn: "_value")
@@ -51,8 +48,7 @@ class CandleSticks:
 
 def main(influx: InfluxDBClient):
     import time
-    candles = CandleSticks(influx, 'coinbasepro', 300, timedelta(minutes=1),
-                           'USD')
+    candles = CandleSticks(influx, 300, timedelta(minutes=1), 'USD')
     total = 0.
     measurements = 7
     for i in range(measurements):

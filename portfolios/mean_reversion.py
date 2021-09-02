@@ -11,8 +11,7 @@ from brain.cool_down import CoolDown
 from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
 from helper.coinbase import AuthenticatedClient
-from indicators import TrailingVolume, TripleEMA, BidAsk, \
-    Ticker
+from indicators import ATR, BidAsk, Ticker, TrailingVolume, TripleEMA
 from indicators.sliding_candles import CandleSticks
 from order_tracker.async_coinbase import AsyncCoinbaseTracker
 from settings import influx_db as influx_db_settings, \
@@ -27,10 +26,11 @@ logger = logging.getLogger(__name__)
 
 class MeanReversionBuy:
     def __init__(self, threshold: float, base_buy_fraction: float,
-                 ema: TripleEMA):
+                 ema: TripleEMA, atr: ATR):
         self.base_buy_fraction = base_buy_fraction
         self.threshold = threshold
         self.ema = ema
+        self.atr = atr
 
     @property
     def periods_required(self) -> int:
@@ -52,10 +52,11 @@ class MeanReversionBuy:
 
 class MeanReversionSell:
     def __init__(self, threshold: float, base_sell_fraction: float,
-                 ema: TripleEMA):
+                 ema: TripleEMA, atr: ATR):
         self.base_sell_fraction = base_sell_fraction
         self.threshold = threshold
         self.ema = ema
+        self.atr = atr
 
     @property
     def periods_required(self) -> int:
@@ -93,11 +94,14 @@ def main() -> None:
     ema = TripleEMA(influx, strategy_settings.EMA_PERIODS,
                     strategy_settings.FREQUENCY,
                     portfolio_settings.QUOTE)
+    atr = ATR(influx, periods=14, frequency=strategy_settings.FREQUENCY,
+              quote=portfolio_settings.QUOTE)
     buy_indicator = MeanReversionBuy(strategy_settings.BUY_THRESHOLD,
-                                     strategy_settings.BASE_BUY_FRACTION, ema)
+                                     strategy_settings.BASE_BUY_FRACTION, ema,
+                                     atr)
     sell_indicator = MeanReversionSell(strategy_settings.SELL_THRESHOLD,
                                        strategy_settings.BASE_SELL_FRACTION,
-                                       ema)
+                                       ema, atr)
     volume_indicator = TrailingVolume(periods=1)
     price_indicator = Ticker(periods=1)
     bid_ask = BidAsk(influx, period=timedelta(minutes=1),
@@ -106,8 +110,8 @@ def main() -> None:
     candle_periods = max(buy_indicator.periods_required,
                          sell_indicator.periods_required,
                          volume_indicator.periods_required, )
-    candles_src = CandleSticks(influx, portfolio_settings.EXCHANGE,
-                               candle_periods, strategy_settings.FREQUENCY,
+    candles_src = CandleSticks(influx, candle_periods,
+                               strategy_settings.FREQUENCY,
                                strategy_settings.TRADE_BUCKET,
                                portfolio_settings.QUOTE)
     buy_horizon = timedelta(seconds=strategy_settings.BUY_TARGET_SECONDS)

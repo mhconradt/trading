@@ -65,8 +65,7 @@ def main():
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
     indicator = TrendStability(periods=5)
-    candles = CandleSticks(influx, 'coinbasepro', 5, timedelta(minutes=1),
-                           'level1', 'USD')
+    candles = CandleSticks(influx, 5, timedelta(minutes=1), 'level1', 'USD')
     while True:
         _start = time.time()
         results = indicator.compute(candles.compute()).sort_values()

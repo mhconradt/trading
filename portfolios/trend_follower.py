@@ -97,9 +97,8 @@ def main() -> None:
                          sell_indicator.periods_required,
                          price_indicator.periods_required,
                          volume_indicator.periods_required, )
-    candles_src = CandleSticks(client, portfolio_settings.EXCHANGE,
-                               candle_periods, timedelta(minutes=1), 'level1',
-                               portfolio_settings.QUOTE)
+    candles_src = CandleSticks(client, candle_periods, timedelta(minutes=1),
+                               'level1', portfolio_settings.QUOTE)
     bid_ask = BidAsk(client, period=timedelta(minutes=1), bucket='level1',
                      quote=portfolio_settings.QUOTE)
     manager = PortfolioManager(coinbase, candles_src,

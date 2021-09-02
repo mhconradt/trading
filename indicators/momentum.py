@@ -46,7 +46,7 @@ def main():
                                    org=influx_db_settings.INFLUX_ORG)
 
     mom = Momentum(periods=15)
-    candles_src = CandleSticks(influx_client, 'coinbasepro', periods=16,
+    candles_src = CandleSticks(influx_client, periods=16,
                                frequency=timedelta(minutes=1), bucket='level1',
                                quote='USD')
     while True:

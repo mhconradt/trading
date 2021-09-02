@@ -9,12 +9,11 @@ from indicators.candles import CandleSticks
 
 
 class ATR:
-    def __init__(self, db: InfluxDBClient, exchange: str, periods: int,
-                 frequency: timedelta, quote: str):
-        self.candles = CandleSticks(db, exchange, periods + 1, frequency,
-                                    quote)
+    def __init__(self, db: InfluxDBClient, periods: int, frequency: timedelta,
+                 quote: str):
+        self.candles = CandleSticks(db, periods + 1, frequency, quote)
 
-    @ttl_cache(ttl=31.)
+    @ttl_cache(ttl=11.)
     def compute(self) -> pd.Series:
         candles = self.candles.compute()
         tr = true_range(candles)
@@ -37,8 +36,7 @@ def true_range(candles: pd.DataFrame) -> pd.DataFrame:
 
 
 def main(influx: InfluxDBClient) -> None:
-    indicator = ATR(influx, exchange='coinbasepro', periods=14,
-                    frequency=timedelta(minutes=1),
+    indicator = ATR(influx, periods=14, frequency=timedelta(minutes=1),
                     quote='USD')
     ranges = indicator.compute()
     print(ranges)

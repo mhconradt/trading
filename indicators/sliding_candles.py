@@ -11,12 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 class CandleSticks:
-    def __init__(self, db: InfluxDBClient, exchange: str, periods: int,
-                 frequency: timedelta, bucket: str, quote: str):
+    def __init__(self, db: InfluxDBClient, periods: int, frequency: timedelta,
+                 bucket: str, quote: str):
         self.bucket = bucket
         self.db = db
         self.frequency = frequency
-        self.exchange = exchange
         self.periods = periods
         self.quote = quote
 
@@ -24,8 +23,7 @@ class CandleSticks:
         _start = time.time()
         query_api = self.db.query_api()
         start = -self.periods * self.frequency
-        parameters = {'exchange': self.exchange,
-                      'freq': self.frequency,
+        parameters = {'freq': self.frequency,
                       'start': start,
                       'bucket': self.bucket,
                       'quote': self.quote}
@@ -41,7 +39,6 @@ class CandleSticks:
                 |> filter(fn: (r) => r["quote"] == quote)
                 |> filter(fn: (r) => r["_field"] == "price" 
                                      or r["_field"] == "size")
-                |> filter(fn: (r) => r["exchange"] == exchange)                
                 |> keep(columns: ["_time", "market", "_value", "_field"])
                 |> window(every: freq, period: freq, offset: offset)
             
@@ -99,8 +96,8 @@ def main():
                                    influx_db_settings.INFLUX_TOKEN,
                                    org_id=influx_db_settings.INFLUX_ORG_ID,
                                    org=influx_db_settings.INFLUX_ORG)
-    candles = CandleSticks(influx_client, 'coinbasepro', 30,
-                           timedelta(minutes=1), 'level1', 'USD')
+    candles = CandleSticks(influx_client, 30, timedelta(minutes=1), 'level1',
+                           'USD')
     while True:
         start = time.time()
         values = candles.compute()
