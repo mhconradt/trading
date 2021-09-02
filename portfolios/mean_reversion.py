@@ -67,7 +67,7 @@ class MeanReversionSell:
         price = candles.close.unstack('market').iloc[-1]
         moving_average, _range = self.ema.compute(), self.atr.compute()
         deviation = price - moving_average
-        threshold = np.maximum(_range / 2, self.threshold)
+        threshold = np.maximum(_range / 2, price * self.threshold)
         above = deviation > threshold
         hold_fraction_base = 1. - self.base_sell_fraction
         # always >= 1.0
