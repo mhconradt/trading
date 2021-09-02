@@ -3,7 +3,6 @@ import time
 import typing as t
 from datetime import timedelta
 
-import cbpro
 from influxdb_client import InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
 
@@ -11,6 +10,7 @@ from helper.coinbase import PublicClient
 from realtime_ingest.sink import RecordSink, InfluxDBTradeSink, \
     InfluxDBTickerSink, BatchingSink, InfluxDBPointSink
 from realtime_ingest.tasks import replay, create_all
+from realtime_ingest.websocket_client import WebsocketClient
 from settings import influx_db as influx_db_settings
 
 EXCHANGE_NAME = 'coinbasepro'
@@ -62,7 +62,7 @@ class MessageHandler(ABC):
         pass
 
 
-class RouterClient(cbpro.WebsocketClient):
+class RouterClient(WebsocketClient):
     def __init__(self, handlers: t.Dict[MessageHandler, t.List[str]],
                  **kwargs):
         channels = set(kwargs.get('channels', []))
