@@ -24,9 +24,11 @@ class CandleSticks:
                       'start': start,
                       'quote': self.quote}
         df = query_api.query_data_frame("""
+            measurement = "candles_${string(v: freq)}"
+        
             from(bucket: "candles")
             |> range(start: start)
-            |> filter(fn: (r) => r["_measurement"] == "candles_${string(v: freq)}")
+            |> filter(fn: (r) => r["_measurement"] == measurement)
             |> filter(fn: (r) => r["quote"] == quote)
             |> filter(fn: (r) => r["exchange"] == exchange)
             |> pivot(rowKey: ["market", "_time"], 
