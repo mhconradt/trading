@@ -37,13 +37,14 @@ class MeanReversionBuy:
         return 1
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
-        prices = candles.close.unstack('market').iloc[-1]
+        price = candles.close.unstack('market').iloc[-1]
         quote_volume = candles.quote_volume.unstack('market').iloc[-1]
         volume_fraction = quote_volume / quote_volume.sum()
-        moving_averages = self.ema.compute()
-        deviation = 1 - (prices / moving_averages)
-        below = deviation > self.threshold
-        adjustment = np.log(deviation[below] / self.threshold)
+        moving_average, _range = self.ema.compute(), self.atr.compute()
+        deviation = moving_average - price
+        threshold = np.maximum(_range / 2, price * self.threshold)
+        below = deviation > threshold
+        adjustment = np.log(deviation[below] / threshold[below])
         hold_fraction_base = 1. - self.base_buy_fraction
         hold_fraction = hold_fraction_base ** adjustment
         buy_fraction = 1. - hold_fraction
@@ -63,13 +64,14 @@ class MeanReversionSell:
         return 1
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
-        prices = candles.close.unstack('market').iloc[-1]
-        moving_averages = self.ema.compute()
-        deviations = prices / moving_averages - 1.
-        above = deviations > self.threshold
+        price = candles.close.unstack('market').iloc[-1]
+        moving_average, _range = self.ema.compute(), self.atr.compute()
+        deviation = price - moving_average
+        threshold = np.maximum(_range / 2, self.threshold)
+        above = deviation > threshold
         hold_fraction_base = 1. - self.base_sell_fraction
         # always >= 1.0
-        acceleration = np.log(deviations[above] / self.threshold)
+        acceleration = np.log(deviation[above] / threshold[above])
         # amount held geometrically decreases with the deviation
         hold_fraction = hold_fraction_base ** acceleration
         return 1. - hold_fraction
