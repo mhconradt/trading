@@ -52,7 +52,8 @@ class PortfolioManager:
                  sell_age_limit=timedelta(minutes=1), post_only: bool = False,
                  sell_order_type: str = 'limit', buy_order_type: str = 'limit',
                  buy_target_horizon=timedelta(minutes=10),
-                 min_tick_time: float = 0.):
+                 min_tick_time: float = 0.,
+                 concentration_limit: float = 0.25):
         # COINBASE CLIENT
         self.exchange = exchange_client
         # SPENDING DIRECTIVES
@@ -73,7 +74,7 @@ class PortfolioManager:
         # RISK MANAGEMENT
         self.cool_down = cool_down
         self.stop_loss = stop_loss
-        self.pop_limit = Decimal('0.2')
+        self.concentration_limit = Decimal(concentration_limit)
         self.pov_limit = Decimal('1')
         # TICK VARIABLES
         self.tick_time: t.Optional[datetime] = None
@@ -164,7 +165,7 @@ class PortfolioManager:
 
     @property
     def position_size_limits(self) -> pd.Series:
-        aum_size_limit = self.aum * self.pop_limit
+        aum_size_limit = self.aum * self.concentration_limit
         pov_size_limits = self.calculate_volume_size_limits()
         mv_limits = DataFrame({'aum': aum_size_limit, 'pov': pov_size_limits})
         return np.min(mv_limits, axis=1).fillna(0.).map(Decimal)
