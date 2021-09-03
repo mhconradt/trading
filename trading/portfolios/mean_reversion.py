@@ -26,10 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 class MeanReversionBuy:
-    def __init__(self, threshold: float, base_buy_fraction: float,
-                 ema: TripleEMA, atr: ATR):
+    def __init__(self, base_buy_fraction: float, ema: TripleEMA, atr: ATR):
         self.base_buy_fraction = base_buy_fraction
-        self.threshold = threshold
         self.ema = ema
         self.atr = atr
 
@@ -54,10 +52,8 @@ class MeanReversionBuy:
 
 
 class MeanReversionSell:
-    def __init__(self, threshold: float, base_sell_fraction: float,
-                 ema: TripleEMA, atr: ATR):
+    def __init__(self, base_sell_fraction: float, ema: TripleEMA, atr: ATR):
         self.base_sell_fraction = base_sell_fraction
-        self.threshold = threshold
         self.ema = ema
         self.atr = atr
 
@@ -101,11 +97,9 @@ def main() -> None:
                     portfolio_settings.QUOTE)
     atr = ATR(influx, periods=14, frequency=strategy_settings.FREQUENCY,
               quote=portfolio_settings.QUOTE)
-    buy_indicator = MeanReversionBuy(strategy_settings.BUY_THRESHOLD,
-                                     strategy_settings.BASE_BUY_FRACTION, ema,
+    buy_indicator = MeanReversionBuy(strategy_settings.BASE_BUY_FRACTION, ema,
                                      atr)
-    sell_indicator = MeanReversionSell(strategy_settings.SELL_THRESHOLD,
-                                       strategy_settings.BASE_SELL_FRACTION,
+    sell_indicator = MeanReversionSell(strategy_settings.BASE_SELL_FRACTION,
                                        ema, atr)
     volume_indicator = TrailingVolume(periods=1)
     price_indicator = Ticker(periods=1)
