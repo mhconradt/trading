@@ -43,7 +43,7 @@ class MeanReversionBuy:
         volume_fraction = quote_volume / quote_volume.sum()
         moving_average, _range = self.ema.compute(), self.atr.compute()
         deviation = moving_average - price
-        threshold = np.maximum(_range / 2, price * self.threshold)
+        threshold = _range / 2.
         deviation, threshold = overlapping_labels(deviation, threshold)
         below = deviation > threshold
         adjustment = np.log(deviation[below] / threshold[below])
@@ -69,7 +69,7 @@ class MeanReversionSell:
         price = candles.close.unstack('market').iloc[-1]
         moving_average, _range = self.ema.compute(), self.atr.compute()
         deviation = price - moving_average
-        threshold = np.maximum(_range / 2, price * self.threshold)
+        threshold = _range / 2.
         deviation, threshold = overlapping_labels(deviation, threshold)
         above = deviation > threshold
         hold_fraction_base = 1. - self.base_sell_fraction

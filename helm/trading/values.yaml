@@ -21,7 +21,7 @@ ingestion:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trade-ingestion
         pullPolicy: Always
         # Overrides the image tag whose default is the chart appVersion.
-        tag: "1.9.5"
+        tag: "1.9.7"
 
 purple_trader:
     nameOverride: "purple-trader"
@@ -33,7 +33,7 @@ purple_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "1.9.5"
+        tag: "1.9.7"
     extraEnv:
         MR_EMA_PERIODS: "30"
         MR_BUY_FRACTION: "0.5"
@@ -55,7 +55,7 @@ blue_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "1.9.5"
+        tag: "1.9.7"
     extraEnv:
         MR_EMA_PERIODS: "26"
         MR_BUY_FRACTION: "0.5"
@@ -77,7 +77,7 @@ red_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "1.9.5"
+        tag: "1.9.7"
     extraEnv:
         MR_EMA_PERIODS: "36"
         MR_BUY_FRACTION: "0.5"
