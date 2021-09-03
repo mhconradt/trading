@@ -11,6 +11,7 @@ from brain.cool_down import CoolDown
 from brain.portfolio_manager import PortfolioManager
 from brain.stop_loss import SimpleStopLoss
 from helper.coinbase import AuthenticatedClient
+from helper.functions import overlapping_labels
 from indicators import ATR, BidAsk, Ticker, TrailingVolume, TripleEMA
 from indicators.sliding_candles import CandleSticks
 from order_tracker.async_coinbase import AsyncCoinbaseTracker
@@ -42,7 +43,8 @@ class MeanReversionBuy:
         volume_fraction = quote_volume / quote_volume.sum()
         moving_average, _range = self.ema.compute(), self.atr.compute()
         deviation = moving_average - price
-        threshold = np.maximum(_range / 2, price * self.threshold)
+        threshold = _range / 2
+        deviation, threshold = overlapping_labels(deviation, threshold)
         below = deviation > threshold
         adjustment = np.log(deviation[below] / threshold[below])
         hold_fraction_base = 1. - self.base_buy_fraction
@@ -67,7 +69,8 @@ class MeanReversionSell:
         price = candles.close.unstack('market').iloc[-1]
         moving_average, _range = self.ema.compute(), self.atr.compute()
         deviation = price - moving_average
-        threshold = np.maximum(_range / 2, price * self.threshold)
+        threshold = _range / 2
+        deviation, threshold = overlapping_labels(deviation, threshold)
         above = deviation > threshold
         hold_fraction_base = 1. - self.base_sell_fraction
         # always >= 1.0
