@@ -1,6 +1,6 @@
 .market_data
 **/*.pyc
-realtime_ingest/watermarks.json
+trading/realtime_ingest/watermarks.json
 terraform/*.tfvars
 terraform/*.tfstate*
 terraform/.terraform.lock.hcl
