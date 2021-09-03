@@ -5,7 +5,7 @@ import pandas as pd
 from influxdb_client import InfluxDBClient
 
 from trading.helper.ttl_cache import ttl_cache
-from trading.indicators import CandleSticks
+from trading.indicators.candles import CandleSticks
 
 
 class ATR:

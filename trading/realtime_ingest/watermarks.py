@@ -35,7 +35,6 @@ def find_trade_id_cursor(product_id: str, to: datetime, start: int,
 
 
 def find_trade_id(product_id: str, to: datetime) -> int:
-    wait_for_public_rate_limit()
     trades = public_client.get_product_trades(product_id)
     try:
         trade_id = next(trades)['trade_id']
@@ -50,7 +49,5 @@ def get_timestamp(product_id: str, trade_id: int) -> datetime:
     trades = requests.get(
         f"https://api.pro.coinbase.com/products/{product_id}/trades",
         params).json()
-    if not trades:
-        print(product_id, trade_id)
     trade, = trades
     return dateutil.parser.parse(trade['time'])
