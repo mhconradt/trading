@@ -51,6 +51,47 @@ class TripleEMA:
         return df.iloc[-1]  # convert to series
 
 
+class EMA:
+    def __init__(self, db: InfluxDBClient, periods: int, frequency: timedelta,
+                 quote: str):
+        self.db = db
+        self.periods = periods
+        self.frequency = frequency
+        self.quote = quote
+
+    @ttl_cache(seconds=11.)
+    def compute(self) -> pd.Series:
+        _start = time.time()
+        calculation_periods = 3 * self.periods
+        start = -calculation_periods * self.frequency
+        params = {'periods': self.periods, 'start': start,
+                  'frequency': self.frequency,
+                  'quote': self.quote}
+        query = """
+            measurement = "candles_" + string(v: frequency)
+
+            from(bucket: "candles")
+              |> range(start: start)
+              |> filter(fn: (r) => r["_measurement"] == measurement)
+              |> filter(fn: (r) => r["quote"] == quote)
+              |> filter(fn: (r) => r["_field"] == "close")
+              |> tail(n: 3 * periods)
+              |> exponentialMovingAverage(n: periods)
+              |> yield(name: "ema")
+        """
+        index = ['market', '_time']
+        query_api = self.db.query_api()
+        raw_df = query_api.query_data_frame(query, params=params,
+                                            data_frame_index=index)
+        if not len(raw_df):
+            raise Exception()
+        if isinstance(raw_df, list):
+            raw_df = pd.concat(raw_df)
+        df = raw_df['_value'].unstack('market')
+        logger.debug(f"Query took {time.time() - _start:.2f}s")
+        return df.iloc[-1]  # convert to series
+
+
 def main():
     import time
     from datetime import timedelta
@@ -72,3 +113,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+__all__ = ['TripleEMA', 'EMA']
