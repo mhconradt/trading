@@ -37,12 +37,12 @@ purple_trader:
     extraEnv:
         TRIPLE_EMA: 1
         MR_EMA_PERIODS: "30"
-        MR_BUY_FRACTION: "0.5"
-        MR_SELL_FRACTION: "0.888"
-        STOP_LOSS: "0.98"
-        COOLDOWN_SECONDS: 10800
-        BUY_TARGET_SECONDS: 360
-        SELL_TARGET_SECONDS: 360
+        MR_BUY_FRACTION: "0.4"
+        MR_SELL_FRACTION: "0.833"
+        STOP_LOSS: "0.99"
+        COOLDOWN_SECONDS: 3600
+        BUY_TARGET_SECONDS: 300
+        SELL_TARGET_SECONDS: 300
 
 blue_trader:
     nameOverride: "blue-trader"
@@ -56,14 +56,14 @@ blue_trader:
         pullPolicy: Always
         tag: "2.0.4"
     extraEnv:
-        TRIPLE_EMA: 0
+        TRIPLE_EMA: 1
         MR_EMA_PERIODS: "30"
-        MR_BUY_FRACTION: "0.5"
-        MR_SELL_FRACTION: "0.875"
-        STOP_LOSS: "0.98"
-        COOLDOWN_SECONDS: 10800
-        BUY_TARGET_SECONDS: 360
-        SELL_TARGET_SECONDS: 360
+        MR_BUY_FRACTION: "0.4"
+        MR_SELL_FRACTION: "0.8"
+        STOP_LOSS: "0.99"
+        COOLDOWN_SECONDS: 3600
+        BUY_TARGET_SECONDS: 300
+        SELL_TARGET_SECONDS: 300
 
 red_trader:
     nameOverride: "red-trader"
@@ -77,10 +77,11 @@ red_trader:
         pullPolicy: Always
         tag: "2.0.4"
     extraEnv:
-        MR_EMA_PERIODS: "20"
-        MR_BUY_FRACTION: "0.5"
+        TRIPLE_EMA: 1
+        MR_EMA_PERIODS: "26"
+        MR_BUY_FRACTION: "0.4"
         MR_SELL_FRACTION: "0.875"
-        STOP_LOSS: "0.98"
-        COOLDOWN_SECONDS: 10800
-        BUY_TARGET_SECONDS: 360
-        SELL_TARGET_SECONDS: 360
+        STOP_LOSS: "0.99"
+        COOLDOWN_SECONDS: 3600
+        BUY_TARGET_SECONDS: 300
+        SELL_TARGET_SECONDS: 300
