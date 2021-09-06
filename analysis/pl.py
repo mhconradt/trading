@@ -1,6 +1,3 @@
-"""
-Perform P/L analysis on fills report.
-"""
 import typing as t
 from decimal import Decimal
 
@@ -16,97 +13,35 @@ def is_sell(trade: dict) -> bool:
     return trade['side'] == 'SELL'
 
 
-def trade_profitability(trades: t.List[dict]) -> None:
-    buy_gross_size, buy_gross_quote_size = Decimal(0), Decimal(0)
-    buy_net_size, buy_net_quote_size = Decimal(0), Decimal(0)
-    buy_i, buy_j = 0, 0
-    sell_gross_size, sell_gross_quote_size = Decimal(0), Decimal(0)
-    sell_net_size, sell_net_quote_size = Decimal(0), Decimal(0)
-    sell_i, sell_j = 0, 0
+def fifo_pl(trades: t.List[dict]) -> None:
+    j = 0
+    sell_size = Decimal(0)
+    sell_price = Decimal(0)
     n = len(trades)
     for i in range(n):
         trade_i = trades[i]
         if is_buy(trade_i):
-            # advance right side of sell window
-            gross_net_margin = sell_gross_size - sell_net_size
-            sell_net_size += trade_i['size']
-            if gross_net_margin >= 0:
-                marginal_price = trades[sell_j]['price']
-                if trade_i['size'] >= gross_net_margin:
-                    sell_net_quote_size += gross_net_margin * marginal_price
-                    # ADVANCE WINDOW ONE STEP
-                    for j in range(sell_j + 1, n):
-                        if is_sell(trades[j]):
-                            sell_j = j
-                            break
-                else:
-                    sell_net_quote_size += trade_i['size'] * marginal_price
-            for j in range(sell_j, n):
-                net_gross_margin = sell_net_size - sell_gross_size
-                if net_gross_margin <= 0:
+            buy_size = trade_i['size']
+            size = Decimal(0)
+            quote_size = Decimal(0)
+            for k in range(j, n):
+                if not buy_size:
                     break
-                trade_j = trades[j]
-                if is_sell(trade_j):
-                    sell_j = j
-                    sell_gross_size += trade_j['size']
-                    sell_gross_quote_size += trade_j['size'] * trade_j['price']
-                    delta_net_size = min(net_gross_margin, trade_j['size'])
-                    sell_net_quote_size += delta_net_size * trade_j['price']
+                if is_sell(trades[k]):
+                    if not sell_size:
+                        sell_size = trades[k]['size']
+                        sell_price = trades[k]['price']
+                        j = k
+                    delta_size = min(sell_size, buy_size)
+                    buy_size -= delta_size
+                    sell_size -= delta_size
+                    size += delta_size
+                    quote_size += delta_size * sell_price
                 else:
                     continue
-            # annotate w/ average sell price
-            trade_i['avg_sell_price'] = sell_gross_quote_size / sell_gross_size
-            # advance right side of buy window
-            buy_j = i
-            buy_gross_size += trade_i['size']
-            buy_net_size += trade_i['size']
-            buy_gross_quote_size += trade_i['size'] * trade_i['price']
-            buy_net_quote_size += trade_i['size'] * trade_i['price']
+            trade_i['avg_sell_price'] = quote_size / size
         else:
-            # advance left side of sell window
-            sell_gross_size -= trade_i['size']
-            sell_net_size -= trade_i['size']
-            sell_gross_quote_size -= trade_i['size'] * trade_i['price']
-            sell_net_quote_size -= trade_i['size'] * trade_i['price']
-            for j in range(i + 1, n):
-                if is_sell(trades[j]):
-                    sell_i = j
-                    break
-            # annotate with average buy price
-            trade_i['avg_buy_price'] = buy_gross_quote_size / buy_gross_size
-            # advance left side of buy window
-            gross_net_margin = buy_gross_size - buy_net_size
-            buy_net_size -= trade_i['size']
-            # take a little bit off each trade
-            if gross_net_margin:
-                marginal_price = trades[buy_i]['price']
-                remaining = trades[buy_i]['size'] - gross_net_margin
-                if trade_i['size'] >= remaining:
-                    # REMOVE BUY_I FROM WINDOW VARS
-                    buy_net_quote_size -= remaining * marginal_price
-                    buy_gross_size -= trades[buy_i]['size']
-                    buy_gross_quote_size -= trades[buy_i][
-                                                'size'] * marginal_price
-                    # ADVANCE LEFT SIDE OF BUY WINDOW ONE STEP
-                    for j in range(buy_i + 1, n):
-                        if is_buy(trades[j]):
-                            buy_i = j
-                            break
-                else:
-                    buy_net_quote_size -= trade_i['size'] * marginal_price
-            for j in range(buy_i, buy_j + 1):
-                trade_j = trades[j]
-                if is_buy(trade_j):
-                    buy_i = j
-                    margin = buy_gross_size - buy_net_size
-                    delta_net_size = min(trade_j['size'], margin)
-                    buy_net_quote_size -= delta_net_size * trade_j['price']
-                    if margin < trade_j['size']:
-                        break
-                    buy_gross_size -= trade_j['size']
-                    buy_gross_quote_size -= trade_j['size'] * trade_j['price']
-                else:
-                    continue
+            continue
 
 
 def zero_pad(fills: DataFrame, account: DataFrame) -> DataFrame:
@@ -117,22 +52,42 @@ def zero_pad(fills: DataFrame, account: DataFrame) -> DataFrame:
     fills = fills.set_index(['size unit', 'created at'])
     products = list(start.index)
     return pd.concat([fills.loc[p].loc[start[p]:end[p]] for p in products],
-                     keys=products, names=['product', 'time'])
+                     keys=products,
+                     names=['product', 'time'])
 
 
-def transform(fills: DataFrame) -> DataFrame:
-    return fills.assign(price=fills.price.map(Decimal),
+def transform_in(fills: DataFrame) -> t.List[dict]:
+    orig = fills.assign(price=fills.price.map(Decimal),
                         size=fills['size'].map(Decimal))
+    return orig.drop('product', axis=1).reset_index().to_dict(orient='records')
 
 
-if __name__ == '__main__':
-    _fills = pd.read_csv('/Users/maxwellconradt/Downloads/fills.csv',
-                         parse_dates=['created at'])
-    _account = pd.read_csv('/Users/maxwellconradt/Downloads/account.csv',
-                           parse_dates=['time'])
-    zpd = zero_pad(_fills[_fills.portfolio == 'Point42 Blue'],
-                   _account[_account.portfolio == 'Point42 Blue'])
-    sol_trades = transform(zpd.loc['SOL']).to_dict(orient='records')
-    trade_profitability(sol_trades)
-    df = DataFrame(sol_trades)
-    print(df)
+def get_minutely_pl(df: pd.DataFrame) -> pd.DataFrame:
+    buys = df[df.side == 'BUY']
+    pl = (buys.avg_sell_price - buys.price) * buys['size']
+    grouper = pl.groupby(level='product')
+    tpl = grouper.apply(lambda s: s.droplevel('product').resample('T').sum())
+    return tpl
+
+
+def transform_out(trades: t.List[dict]) -> pd.DataFrame:
+    df = pd.DataFrame(trades)
+    df = df.assign(avg_sell_price=pd.to_numeric(df.avg_sell_price),
+                   price=pd.to_numeric(df.price),
+                   size=pd.to_numeric(df['size'])
+                   ).reset_index().set_index(['product', 'time'])
+    return df
+
+
+def analyze(account: DataFrame, fills: DataFrame):
+    zpd = zero_pad(fills, account)
+    trades = transform_in(zpd)
+    i = 0
+    product = None
+    for j in range(len(trades)):
+        if trades[j]['product'] != product:
+            product = trades[j]['product']
+            fifo_pl(trades[i:j])
+            i = j
+    trade_pl = transform_out(trades)
+    return get_minutely_pl(trade_pl)
