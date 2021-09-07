@@ -80,7 +80,7 @@ red_trader:
         TRIPLE_EMA: 1
         MR_EMA_PERIODS: "26"
         MR_BUY_FRACTION: "0.4"
-        MR_SELL_FRACTION: "0.875"
+        MR_SELL_FRACTION: "0.888"
         STOP_LOSS: "0.99"
         COOLDOWN_SECONDS: 3600
         BUY_TARGET_SECONDS: 300
