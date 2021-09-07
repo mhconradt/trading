@@ -12,8 +12,8 @@ from trading.brain.portfolio_manager import PortfolioManager
 from trading.brain.stop_loss import SimpleStopLoss
 from trading.coinbase.helper import AuthenticatedClient
 from trading.helper.functions import overlapping_labels
-from trading.indicators import ATR, BidAsk, Ticker, TrailingVolume, EMA, \
-    TripleEMA
+from trading.indicators import (ATR, BidAsk, Ticker, TrailingVolume,
+                                TripleEMA, MarketFraction)
 from trading.indicators.sliding_candles import CandleSticks
 from trading.order_tracker.async_coinbase import AsyncCoinbaseTracker
 from trading.settings import mean_reversion as strategy_settings, \
@@ -27,10 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 class MeanReversionBuy:
-    def __init__(self, base_buy_fraction: float, ema: EMA, atr: ATR):
+    def __init__(self, base_buy_fraction: float, ema: TripleEMA, atr: ATR,
+                 market_fraction: MarketFraction):
         self.base_buy_fraction = base_buy_fraction
         self.ema = ema
         self.atr = atr
+        self.market_fraction = market_fraction
 
     @property
     def periods_required(self) -> int:
@@ -38,8 +40,7 @@ class MeanReversionBuy:
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         price = candles.close.unstack('market').iloc[-1]
-        quote_volume = candles.quote_volume.unstack('market').iloc[-1]
-        volume_fraction = quote_volume / quote_volume.sum()
+        market_fraction = self.market_fraction.compute()
         moving_average, _range = self.ema.compute(), self.atr.compute()
         deviation = moving_average - price
         threshold = _range / 2.
@@ -50,11 +51,11 @@ class MeanReversionBuy:
         hold_fraction = hold_fraction_base ** adjustment
         buy_fraction = 1. - hold_fraction
         # market only present in buy fraction if exceeds threshold
-        return (buy_fraction * volume_fraction).dropna()
+        return (buy_fraction * market_fraction).dropna()
 
 
 class MeanReversionSell:
-    def __init__(self, base_sell_fraction: float, ema: EMA, atr: ATR):
+    def __init__(self, base_sell_fraction: float, ema: TripleEMA, atr: ATR):
         self.base_sell_fraction = base_sell_fraction
         self.ema = ema
         self.atr = atr
@@ -94,18 +95,16 @@ def main() -> None:
                                    api_secret=cb_settings.SECRET,
                                    api_passphrase=cb_settings.PASSPHRASE,
                                    ignore_untracked=False)
-    if strategy_settings.TRIPLE_EMA:
-        ema = TripleEMA(influx, strategy_settings.EMA_PERIODS,
-                        strategy_settings.FREQUENCY,
-                        portfolio_settings.QUOTE)
-    else:
-        ema = EMA(influx, strategy_settings.EMA_PERIODS,
-                  strategy_settings.FREQUENCY,
-                  portfolio_settings.QUOTE)
+    ema = TripleEMA(influx, strategy_settings.EMA_PERIODS,
+                    strategy_settings.FREQUENCY,
+                    portfolio_settings.QUOTE)
     atr = ATR(influx, periods=14, frequency=strategy_settings.FREQUENCY,
               quote=portfolio_settings.QUOTE)
+    market_fraction = MarketFraction(influx, periods=60,
+                                     frequency=strategy_settings.FREQUENCY,
+                                     quote=portfolio_settings.QUOTE)
     buy_indicator = MeanReversionBuy(strategy_settings.BASE_BUY_FRACTION, ema,
-                                     atr)
+                                     atr, market_fraction)
     sell_indicator = MeanReversionSell(strategy_settings.BASE_SELL_FRACTION,
                                        ema, atr)
     volume_indicator = TrailingVolume(periods=1)
