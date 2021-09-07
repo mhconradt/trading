@@ -1,6 +1,7 @@
 import logging
 import signal
 import sys
+import time
 from datetime import timedelta
 
 import numpy as np
@@ -90,11 +91,6 @@ def main() -> None:
                                    api_url=cb_settings.API_URL)
     products = [product['id'] for product in coinbase.get_products() if
                 product['quote_currency'] == portfolio_settings.QUOTE]
-    tracker = AsyncCoinbaseTracker(products=products,
-                                   api_key=cb_settings.API_KEY,
-                                   api_secret=cb_settings.SECRET,
-                                   api_passphrase=cb_settings.PASSPHRASE,
-                                   ignore_untracked=False)
     ema = TripleEMA(influx, strategy_settings.EMA_PERIODS,
                     strategy_settings.FREQUENCY,
                     portfolio_settings.QUOTE)
@@ -124,30 +120,41 @@ def main() -> None:
     # The idea here is to stop trading something after hitting the stop loss
     cool_down = CoolDown(sell_period=portfolio_settings.STOP_LOSS_COOLDOWN)
     stop_loss = SimpleStopLoss(stop_loss=portfolio_settings.STOP_LOSS)
-    manager = PortfolioManager(coinbase, candles_src,
-                               buy_indicator=buy_indicator,
-                               sell_indicator=sell_indicator,
-                               price_indicator=price_indicator,
-                               volume_indicator=volume_indicator,
-                               bid_ask_indicator=bid_ask,
-                               market_blacklist={'USDT-USD', 'DAI-USD',
-                                                 'CLV-USD', 'PAX-USD'},
-                               liquidate_on_shutdown=False,
-                               quote=portfolio_settings.QUOTE,
-                               order_tracker=tracker, cool_down=cool_down,
-                               stop_loss=stop_loss,
-                               sell_target_horizon=sell_horizon,
-                               buy_age_limit=timedelta(seconds=30),
-                               sell_age_limit=timedelta(seconds=30),
-                               post_only=True, sell_order_type='limit',
-                               buy_order_type='limit',
-                               buy_target_horizon=buy_horizon,
-                               min_tick_time=portfolio_settings.MIN_TICK_TIME)
-    signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
-    try:
-        manager.run()
-    finally:
-        manager.shutdown()
+    while True:
+        outer_tick_start = time.time()
+        tracker = AsyncCoinbaseTracker(products=products,
+                                       api_key=cb_settings.API_KEY,
+                                       api_secret=cb_settings.SECRET,
+                                       api_passphrase=cb_settings.PASSPHRASE,
+                                       ignore_untracked=False)
+        min_tick_time = portfolio_settings.MIN_TICK_TIME
+        manager = PortfolioManager(coinbase, candles_src,
+                                   buy_indicator=buy_indicator,
+                                   sell_indicator=sell_indicator,
+                                   price_indicator=price_indicator,
+                                   volume_indicator=volume_indicator,
+                                   bid_ask_indicator=bid_ask,
+                                   market_blacklist={'USDT-USD', 'DAI-USD',
+                                                     'CLV-USD', 'PAX-USD'},
+                                   liquidate_on_shutdown=False,
+                                   quote=portfolio_settings.QUOTE,
+                                   order_tracker=tracker,
+                                   cool_down=cool_down,
+                                   stop_loss=stop_loss,
+                                   sell_target_horizon=sell_horizon,
+                                   buy_age_limit=timedelta(seconds=30),
+                                   sell_age_limit=timedelta(seconds=30),
+                                   post_only=True, sell_order_type='limit',
+                                   buy_order_type='limit',
+                                   buy_target_horizon=buy_horizon,
+                                   min_tick_time=min_tick_time)
+        signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
+        try:
+            manager.run()
+        finally:
+            manager.shutdown()
+            if time.time() - outer_tick_start < 60:
+                break
     sys.exit(1)
 
 
