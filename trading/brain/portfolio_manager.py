@@ -309,9 +309,9 @@ class PortfolioManager:
                 continue
             max_funds = Decimal(info['max_market_funds'])
             funds = min(funds, max_funds)
-            order = self.exchange.place_market_order(market, side='buy',
-                                                     funds=str(funds),
-                                                     stp='cn')
+            order = self.exchange.retryable_market_order(market, side='buy',
+                                                         funds=str(funds),
+                                                         stp='cn')
             self.cool_down.bought(market)
             if 'id' not in order:
                 logger.warning(order)
@@ -367,12 +367,12 @@ class PortfolioManager:
             size = min(size, max_size)
             post_only = self.post_only or info['post_only']
             tif = 'GTC' if post_only else self.buy_time_in_force
-            order = self.exchange.place_limit_order(market, side='buy',
-                                                    price=str(price),
-                                                    size=str(size),
-                                                    time_in_force=tif,
-                                                    post_only=post_only,
-                                                    stp='cn')
+            order = self.exchange.retryable_limit_order(market, side='buy',
+                                                        price=str(price),
+                                                        size=str(size),
+                                                        time_in_force=tif,
+                                                        post_only=post_only,
+                                                        stp='cn')
             self.cool_down.bought(market)
             if 'id' not in order:
                 next_generation.append(buy)
@@ -607,10 +607,10 @@ class PortfolioManager:
                 continue
             exp = Decimal(self.market_info[sell.market]['base_increment'])
             size = sell.size.quantize(exp, rounding='ROUND_DOWN')
-            order = self.exchange.place_market_order(sell.market,
-                                                     side='sell',
-                                                     size=str(size),
-                                                     stp='dc')
+            order = self.exchange.retryable_market_order(sell.market,
+                                                         side='sell',
+                                                         size=str(size),
+                                                         stp='dc')
             if 'id' not in order:
                 logger.warning(f"Error placing order {order} {sell}")
                 continue
@@ -719,14 +719,13 @@ class PortfolioManager:
             price = self.asks[sell.market].quantize(quote_increment)
             post_only = market_info['post_only'] or self.post_only
             tif = 'GTC' if post_only else self.sell_time_in_force
-            kwargs = dict(product_id=sell.market,
-                          side='sell',
-                          price=str(price),
-                          size=str(sell.size),
-                          time_in_force=tif,
-                          post_only=post_only,
-                          stp='co')
-            order = self.exchange.place_limit_order(**kwargs)
+            order = self.exchange.retryable_limit_order(product_id=sell.market,
+                                                        side='sell',
+                                                        price=str(price),
+                                                        size=str(sell.size),
+                                                        time_in_force=tif,
+                                                        post_only=post_only,
+                                                        stp='co')
             if 'id' not in order:
                 # this means the market moved up
                 if order.get('message') == 'Post only mode':

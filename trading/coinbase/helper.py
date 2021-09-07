@@ -166,6 +166,7 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
             try:
                 return self.place_market_order(*args, **kwargs)
             except (requests.RequestException, InternalServerError) as e:
+                time.sleep(1)
                 if order := self.get_order_by_client_oid(client_oid):
                     return order
                 else:
@@ -182,6 +183,7 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
             try:
                 return self.place_limit_order(*args, **kwargs)
             except (requests.RequestException, InternalServerError) as e:
+                time.sleep(1)
                 if order := self.get_order_by_client_oid(client_oid):
                     return order
                 else:
