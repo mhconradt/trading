@@ -21,7 +21,7 @@ ingestion:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trade-ingestion
         pullPolicy: Always
         # Overrides the image tag whose default is the chart appVersion.
-        tag: "2.0.8"
+        tag: "2.0.9"
 
 purple_trader:
     nameOverride: "purple-trader"
@@ -33,13 +33,13 @@ purple_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "2.0.8"
+        tag: "2.0.9"
     extraEnv:
         MR_EMA_PERIODS: "30"
         MR_BUY_FRACTION: "0.4"
         MR_SELL_FRACTION: "0.833"
-        STOP_LOSS: "0.995"
-        COOLDOWN_SECONDS: 1800
+        STOP_LOSS: "0.98"
+        COOLDOWN_SECONDS: 10800
         BUY_TARGET_SECONDS: 300
         SELL_TARGET_SECONDS: 300
 
@@ -53,11 +53,11 @@ blue_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "2.0.8"
+        tag: "2.0.9"
     extraEnv:
         MR_EMA_PERIODS: "30"
         MR_BUY_FRACTION: "0.4"
-        MR_SELL_FRACTION: "0.875"
+        MR_SELL_FRACTION: "0.85"
         STOP_LOSS: "0.98"
         COOLDOWN_SECONDS: 10800
         BUY_TARGET_SECONDS: 300
@@ -73,12 +73,12 @@ red_trader:
     image:
         repository: 565925249289.dkr.ecr.us-east-1.amazonaws.com/trader
         pullPolicy: Always
-        tag: "2.0.8"
+        tag: "2.0.9"
     extraEnv:
         MR_EMA_PERIODS: "30"
         MR_BUY_FRACTION: "0.4"
-        MR_SELL_FRACTION: "0.888"
-        STOP_LOSS: "0.0"
+        MR_SELL_FRACTION: "0.875"
+        STOP_LOSS: "0.98"
         COOLDOWN_SECONDS: 10800
         BUY_TARGET_SECONDS: 300
         SELL_TARGET_SECONDS: 300
