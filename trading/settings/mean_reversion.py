@@ -12,5 +12,9 @@ TRADE_BUCKET = 'level1'
 TICKER_BUCKET = 'level1'
 FREQUENCY = timedelta(minutes=1)
 
-BUY_TARGET_SECONDS = env.int("BUY_TARGET_SECONDS", 300)
-SELL_TARGET_SECONDS = env.int("SELL_TARGET_SECONDS", 300)
+BUY_HORIZON = env.timedelta("BUY_TARGET_SECONDS", timedelta(minutes=5),
+                            precision='seconds')
+SELL_HORIZON = env.timedelta("SELL_TARGET_SECONDS", timedelta(minutes=5),
+                             precision='seconds')
+RMMI_PERIOD = env.timedelta("RMMI_SECONDS", timedelta(minutes=5),
+                            precision='seconds')

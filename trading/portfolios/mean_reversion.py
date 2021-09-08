@@ -14,7 +14,7 @@ from trading.brain.stop_loss import SimpleStopLoss
 from trading.coinbase.helper import AuthenticatedClient
 from trading.helper.functions import overlapping_labels
 from trading.indicators import (ATR, BidAsk, Ticker, TrailingVolume,
-                                TripleEMA, MarketFraction)
+                                TripleEMA, MarketFraction, RelativeMMI)
 from trading.indicators.sliding_candles import CandleSticks
 from trading.order_tracker.async_coinbase import AsyncCoinbaseTracker
 from trading.settings import mean_reversion as strategy_settings, \
@@ -93,6 +93,10 @@ def main() -> None:
     market_fraction = MarketFraction(influx, periods=60,
                                      frequency=strategy_settings.FREQUENCY,
                                      quote=portfolio_settings.QUOTE)
+    rmmi = RelativeMMI(influx, market_fraction,
+                       period=strategy_settings.RMMI_PERIOD,
+                       toleration=timedelta(seconds=60),
+                       quote=portfolio_settings.QUOTE)
     buy_indicator = MeanReversionBuy(strategy_settings.BASE_BUY_FRACTION, ema,
                                      atr, market_fraction)
     sell_indicator = MeanReversionSell(strategy_settings.BASE_SELL_FRACTION,
@@ -109,8 +113,6 @@ def main() -> None:
                                strategy_settings.FREQUENCY,
                                strategy_settings.TRADE_BUCKET,
                                portfolio_settings.QUOTE)
-    buy_horizon = timedelta(seconds=strategy_settings.BUY_TARGET_SECONDS)
-    sell_horizon = timedelta(seconds=strategy_settings.SELL_TARGET_SECONDS)
     # The idea here is to stop trading something after hitting the stop loss
     cool_down = CoolDown(sell_period=portfolio_settings.STOP_LOSS_COOLDOWN)
     stop_loss = SimpleStopLoss(stop_loss=portfolio_settings.STOP_LOSS)
@@ -141,12 +143,12 @@ def main() -> None:
                                    order_tracker=tracker,
                                    cool_down=cool_down,
                                    stop_loss=stop_loss,
-                                   sell_target_horizon=sell_horizon,
+                                   sell_horizon=strategy_settings.SELL_HORIZON,
                                    buy_age_limit=timedelta(seconds=30),
                                    sell_age_limit=timedelta(seconds=30),
                                    post_only=True, sell_order_type='limit',
                                    buy_order_type='limit',
-                                   buy_target_horizon=buy_horizon,
+                                   buy_horizon=strategy_settings.BUY_HORIZON,
                                    min_tick_time=min_tick_time)
         signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
         try:

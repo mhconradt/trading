@@ -46,21 +46,21 @@ class PortfolioManager:
                  liquidate_on_shutdown: bool, quote: str,
                  order_tracker: OrderTracker, cool_down: CoolDown,
                  stop_loss: StopLoss, *,
-                 sell_target_horizon=timedelta(minutes=5),
+                 sell_horizon=timedelta(minutes=5),
                  buy_time_in_force: str = 'GTC',
                  sell_time_in_force: str = 'GTC',
                  buy_age_limit=timedelta(minutes=1),
                  sell_age_limit=timedelta(minutes=1), post_only: bool = False,
                  sell_order_type: str = 'limit', buy_order_type: str = 'limit',
-                 buy_target_horizon=timedelta(minutes=10),
+                 buy_horizon=timedelta(minutes=10),
                  min_tick_time: float = 0.,
                  concentration_limit: float = 0.25):
         # COINBASE CLIENT
         self.exchange = exchange_client
         # SPENDING DIRECTIVES
         self.quote = quote
-        self.buy_target_horizon = buy_target_horizon
-        self.sell_target_horizon = sell_target_horizon
+        self.buy_horizon = buy_horizon
+        self.sell_horizon = sell_horizon
         self.blacklist = market_blacklist
         # LEVEL1 INDICATORS
         self.candles_src = candles_src
@@ -842,8 +842,8 @@ class PortfolioManager:
         buy_targets = self.buy_indicator.compute(candles)
         sell_targets = self.sell_indicator.compute(candles)
         if last_tick_time:
-            buy_horizon_seconds = self.buy_target_horizon.total_seconds()
-            sell_horizon_seconds = self.sell_target_horizon.total_seconds()
+            buy_horizon_seconds = self.buy_horizon.total_seconds()
+            sell_horizon_seconds = self.sell_horizon.total_seconds()
             last_tick_duration = self.tick_time - last_tick_time
             duration = last_tick_duration.total_seconds()
             buy_target_periods = np.floor(buy_horizon_seconds / duration)
