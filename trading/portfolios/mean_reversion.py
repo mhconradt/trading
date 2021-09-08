@@ -85,12 +85,6 @@ def main() -> None:
                             influx_db_settings.INFLUX_TOKEN,
                             org_id=influx_db_settings.INFLUX_ORG_ID,
                             org=influx_db_settings.INFLUX_ORG)
-    coinbase = AuthenticatedClient(key=cb_settings.API_KEY,
-                                   b64secret=cb_settings.SECRET,
-                                   passphrase=cb_settings.PASSPHRASE,
-                                   api_url=cb_settings.API_URL)
-    products = [product['id'] for product in coinbase.get_products() if
-                product['quote_currency'] == portfolio_settings.QUOTE]
     ema = TripleEMA(influx, strategy_settings.EMA_PERIODS,
                     strategy_settings.FREQUENCY,
                     portfolio_settings.QUOTE)
@@ -122,6 +116,12 @@ def main() -> None:
     stop_loss = SimpleStopLoss(stop_loss=portfolio_settings.STOP_LOSS)
     while True:
         outer_tick_start = time.time()
+        coinbase = AuthenticatedClient(key=cb_settings.API_KEY,
+                                       b64secret=cb_settings.SECRET,
+                                       passphrase=cb_settings.PASSPHRASE,
+                                       api_url=cb_settings.API_URL)
+        products = [product['id'] for product in coinbase.get_products() if
+                    product['quote_currency'] == portfolio_settings.QUOTE]
         tracker = AsyncCoinbaseTracker(products=products,
                                        api_key=cb_settings.API_KEY,
                                        api_secret=cb_settings.SECRET,
@@ -151,7 +151,7 @@ def main() -> None:
         signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
         try:
             manager.run()
-        finally:
+        except (Exception,):
             manager.shutdown()
             if time.time() - outer_tick_start < 60:
                 break
