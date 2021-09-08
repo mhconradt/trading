@@ -11,13 +11,14 @@ from trading.indicators.candles import CandleSticks
 class ATR:
     def __init__(self, db: InfluxDBClient, periods: int, frequency: timedelta,
                  quote: str):
-        self.candles = CandleSticks(db, periods + 1, frequency, quote)
+        self.candles = CandleSticks(db, 2 * periods + 1, frequency, quote)
+        self.periods = periods
 
     @ttl_cache(seconds=11.)
     def compute(self) -> pd.Series:
         candles = self.candles.compute()
         tr = true_range(candles)
-        return tr.mean()
+        return tr.ewm(span=self.periods).mean().iloc[-1]
 
 
 def true_range(candles: pd.DataFrame) -> pd.DataFrame:
