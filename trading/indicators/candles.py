@@ -48,7 +48,7 @@ class CandleSticks:
 
 def main(influx: InfluxDBClient):
     import time
-    candles = CandleSticks(influx, 300, timedelta(minutes=1), 'USD')
+    candles = CandleSticks(influx, 1440, timedelta(minutes=1), 'USD')
     total = 0.
     measurements = 7
     for i in range(measurements):

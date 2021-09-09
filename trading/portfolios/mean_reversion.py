@@ -50,9 +50,9 @@ class MeanReversionBuy:
         threshold = atr / 2.
         deviation, threshold = overlapping_labels(deviation, threshold)
         below = deviation > threshold
-        rmmi_acceleration = -1 * min_max(-5, rmmi, 5)
+        rmmi_acceleration = -1 * min_max(-2, rmmi, 2)
         reversion_acceleration = np.log(deviation[below] / threshold[below])
-        acceleration = reversion_acceleration + rmmi_acceleration
+        acceleration = (reversion_acceleration + rmmi_acceleration) / 2
         hold_fraction_base = 1. - self.base_buy_fraction
         hold_fraction = hold_fraction_base ** acceleration
         buy_fraction = 1. - hold_fraction
@@ -83,7 +83,7 @@ class MeanReversionSell:
         above = deviation > threshold
         hold_fraction_base = 1. - self.base_sell_fraction
         # always >= 1.0
-        rmmi_acceleration = min_max(-3, rmmi, 3)
+        rmmi_acceleration = min_max(-2, rmmi, 2)
         reversion_acceleration = np.log(deviation[above] / threshold[above])
         acceleration = (reversion_acceleration + rmmi_acceleration) / 2
         # amount held geometrically decreases with the deviation
