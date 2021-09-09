@@ -27,6 +27,15 @@ logging.basicConfig(format='%(levelname)s:%(module)s:%(message)s',
 logger = logging.getLogger(__name__)
 
 
+def combine_signals(mean_reversion: np.array, rmmi: np.array) -> np.array:
+    lower, upper = rmmi.quantile([0.1, 0.9])
+    # mathematically between -2 and 2. between -1 and 1 to extent symmetric.
+    standard_rmmi = min_max(lower, rmmi, upper) / ((upper - lower) / 2)
+    # anything between cancelling out or double the effect
+    trimmed_rmmi = min_max(-mean_reversion, standard_rmmi, mean_reversion)
+    return mean_reversion + trimmed_rmmi
+
+
 class MeanReversionBuy:
     def __init__(self, base_buy_fraction: float, ema: TripleEMA, atr: ATR,
                  market_fraction: MarketFraction, rmmi: RelativeMMI):
@@ -51,10 +60,9 @@ class MeanReversionBuy:
         deviation, threshold = overlapping_labels(deviation, threshold)
         below = deviation > threshold
         reversion_acceleration = np.log(deviation[below] / threshold[below])
-        rmmi_acceleration = -1 * min_max(-2, rmmi, 2)
-        acceleration = (reversion_acceleration + rmmi_acceleration) / 2
+        acceleration = combine_signals(reversion_acceleration, -rmmi)
         hold_fraction_base = 1. - self.base_buy_fraction
-        hold_fraction = hold_fraction_base ** np.maximum(acceleration, 0.)
+        hold_fraction = hold_fraction_base ** acceleration
         buy_fraction = 1. - hold_fraction
         # market only present in buy fraction if exceeds threshold
         return (buy_fraction * market_fraction).dropna()
@@ -84,10 +92,9 @@ class MeanReversionSell:
         hold_fraction_base = 1. - self.base_sell_fraction
         # always >= 1.0
         reversion_acceleration = np.log(deviation[above] / threshold[above])
-        rmmi_acceleration = min_max(-2, rmmi, 2)
-        acceleration = (reversion_acceleration + rmmi_acceleration) / 2
+        acceleration = combine_signals(reversion_acceleration, rmmi)
         # amount held geometrically decreases with the deviation
-        hold_fraction = hold_fraction_base ** np.maximum(acceleration, 0.)
+        hold_fraction = hold_fraction_base ** acceleration
         return 1. - hold_fraction
 
 

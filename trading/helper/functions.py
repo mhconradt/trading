@@ -11,8 +11,8 @@ def overlapping_labels(a: pd.Series,
     return a.loc[intersection], b.loc[intersection]
 
 
-def min_max(minimum: float, a: np.array, maximum: float) -> np.array:
-    assert minimum <= maximum
+def min_max(minimum: t.Union[float, np.array], a: np.array,
+            maximum: t.Union[float, np.array]) -> np.array:
     return np.maximum(np.minimum(a, maximum), minimum)
 
 
