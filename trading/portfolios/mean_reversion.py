@@ -12,9 +12,9 @@ from trading.brain.cool_down import CoolDown
 from trading.brain.portfolio_manager import PortfolioManager
 from trading.brain.stop_loss import SimpleStopLoss
 from trading.coinbase.helper import AuthenticatedClient
-from trading.helper.functions import overlapping_labels
-from trading.indicators import (ATR, BidAsk, Ticker, TrailingVolume,
-                                TripleEMA, MarketFraction, RelativeMMI)
+from trading.helper.functions import min_max, overlapping_labels
+from trading.indicators import (ATR, BidAsk, MarketFraction, RelativeMMI,
+                                Ticker, TrailingVolume, TripleEMA)
 from trading.indicators.sliding_candles import CandleSticks
 from trading.order_tracker.async_coinbase import AsyncCoinbaseTracker
 from trading.settings import mean_reversion as strategy_settings, \
@@ -29,11 +29,12 @@ logger = logging.getLogger(__name__)
 
 class MeanReversionBuy:
     def __init__(self, base_buy_fraction: float, ema: TripleEMA, atr: ATR,
-                 market_fraction: MarketFraction):
+                 market_fraction: MarketFraction, rmmi: RelativeMMI):
         self.base_buy_fraction = base_buy_fraction
         self.ema = ema
         self.atr = atr
         self.market_fraction = market_fraction
+        self.rmmi = rmmi
 
     @property
     def periods_required(self) -> int:
@@ -42,24 +43,30 @@ class MeanReversionBuy:
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         price = candles.close.unstack('market').iloc[-1]
         market_fraction = self.market_fraction.compute()
-        moving_average, _range = self.ema.compute(), self.atr.compute()
+        moving_average = self.ema.compute()
+        atr = self.atr.compute()
+        rmmi = self.rmmi.compute()
         deviation = moving_average - price
-        threshold = _range / 2.
+        threshold = atr / 2.
         deviation, threshold = overlapping_labels(deviation, threshold)
         below = deviation > threshold
-        adjustment = np.log(deviation[below] / threshold[below])
+        rmmi_acceleration = -1 * min_max(-5, rmmi, 5)
+        reversion_acceleration = np.log(deviation[below] / threshold[below])
+        acceleration = reversion_acceleration + rmmi_acceleration
         hold_fraction_base = 1. - self.base_buy_fraction
-        hold_fraction = hold_fraction_base ** adjustment
+        hold_fraction = hold_fraction_base ** acceleration
         buy_fraction = 1. - hold_fraction
         # market only present in buy fraction if exceeds threshold
         return (buy_fraction * market_fraction).dropna()
 
 
 class MeanReversionSell:
-    def __init__(self, base_sell_fraction: float, ema: TripleEMA, atr: ATR):
+    def __init__(self, base_sell_fraction: float, ema: TripleEMA, atr: ATR,
+                 rmmi: RelativeMMI):
         self.base_sell_fraction = base_sell_fraction
         self.ema = ema
         self.atr = atr
+        self.rmmi = rmmi
 
     @property
     def periods_required(self) -> int:
@@ -67,14 +74,18 @@ class MeanReversionSell:
 
     def compute(self, candles: pd.DataFrame) -> pd.Series:
         price = candles.close.unstack('market').iloc[-1]
-        moving_average, _range = self.ema.compute(), self.atr.compute()
+        moving_average = self.ema.compute()
+        atr = self.atr.compute()
+        rmmi = self.rmmi.compute()
         deviation = price - moving_average
-        threshold = _range / 2.
+        threshold = atr / 2.
         deviation, threshold = overlapping_labels(deviation, threshold)
         above = deviation > threshold
         hold_fraction_base = 1. - self.base_sell_fraction
         # always >= 1.0
-        acceleration = np.log(deviation[above] / threshold[above])
+        rmmi_acceleration = min_max(-3, rmmi, 3)
+        reversion_acceleration = np.log(deviation[above] / threshold[above])
+        acceleration = (reversion_acceleration + rmmi_acceleration) / 2
         # amount held geometrically decreases with the deviation
         hold_fraction = hold_fraction_base ** acceleration
         return 1. - hold_fraction
@@ -98,9 +109,9 @@ def main() -> None:
                        toleration=timedelta(seconds=60),
                        quote=portfolio_settings.QUOTE)
     buy_indicator = MeanReversionBuy(strategy_settings.BASE_BUY_FRACTION, ema,
-                                     atr, market_fraction)
+                                     atr, market_fraction, rmmi)
     sell_indicator = MeanReversionSell(strategy_settings.BASE_SELL_FRACTION,
-                                       ema, atr)
+                                       ema, atr, rmmi)
     volume_indicator = TrailingVolume(periods=1)
     price_indicator = Ticker(periods=1)
     bid_ask = BidAsk(influx, period=timedelta(minutes=1),
@@ -153,10 +164,13 @@ def main() -> None:
         signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
         try:
             manager.run()
+        except KeyboardInterrupt:
+            break
         except (Exception,):
-            manager.shutdown()
-            if time.time() - outer_tick_start < 60:
+            if time.time() - outer_tick_start < 60 or manager.stop:
                 break
+        finally:
+            manager.shutdown()
     sys.exit(1)
 
 

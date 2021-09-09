@@ -929,7 +929,7 @@ class PortfolioManager:
             positions.append(position)
         self.active_positions = positions
 
-    def run(self) -> t.NoReturn:
+    def run(self) -> None:
         self.set_market_info()
         self.set_fee()
         while not self.stop:

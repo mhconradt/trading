@@ -18,7 +18,7 @@ class RelativeMMI:
         self.quote = quote
         self.market_fraction = market_fraction
 
-    @ttl_cache(seconds=1.)
+    @ttl_cache(seconds=2.)
     def compute(self) -> pd.Series:
         price_query = """
             from(bucket: "level1")
@@ -49,8 +49,8 @@ class RelativeMMI:
         large_markets = weights[weights > 0.01].index
         multiples = stop_price / start_price
         # only use large markets in index computation
-        mmi = weighted_harmonic_mean(multiples[large_markets],
-                                     weights[large_markets])
+        mmi = np.average(multiples[large_markets],
+                         weights=weights[large_markets])
         print(mmi)
         # prevent exploding values
         mmi = 1.001 if 1 < mmi < 1.001 else 0.999 if 1 > mmi > 0.999 else mmi
@@ -58,11 +58,6 @@ class RelativeMMI:
         base *= np.sign(base)
         indices = np.log(multiples) / base
         return indices
-
-
-def weighted_harmonic_mean(data: np.array,
-                           weights: np.array) -> float:
-    return np.sum(weights) / np.sum(weights / data)
 
 
 def describe(indices: pd.Series) -> None:
@@ -77,17 +72,17 @@ def main(influx: InfluxDBClient) -> None:
                                      'USD')
     r_mmi5 = RelativeMMI(influx, market_fraction, timedelta(minutes=5),
                          timedelta(minutes=1), 'USD')
-    r_mmi10 = RelativeMMI(influx, market_fraction, timedelta(minutes=10),
-                          timedelta(minutes=1), 'USD')
     r_mmi15 = RelativeMMI(influx, market_fraction, timedelta(minutes=15),
+                          timedelta(minutes=1), 'USD')
+    r_mmi10 = RelativeMMI(influx, market_fraction, timedelta(minutes=10),
                           timedelta(minutes=1), 'USD')
     for _ in range(60):
         i5 = r_mmi5.compute().rename('rmmi5')
         describe(i5)
-        i10 = r_mmi10.compute().rename('rmmi10')
-        describe(i10)
         i15 = r_mmi15.compute().rename('rmmi15')
         describe(i15)
+        i10 = r_mmi10.compute().rename('rmmi10')
+        describe(i10)
         time.sleep(60)
 
 
