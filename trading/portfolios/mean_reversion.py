@@ -152,7 +152,7 @@ def main() -> None:
                                    volume_indicator=volume_indicator,
                                    bid_ask_indicator=bid_ask,
                                    market_blacklist={'USDT-USD', 'DAI-USD',
-                                                     'CLV-USD', 'PAX-USD'},
+                                                     'CLV-USD', 'PAX-USD', },
                                    liquidate_on_shutdown=False,
                                    quote=portfolio_settings.QUOTE,
                                    order_tracker=tracker,

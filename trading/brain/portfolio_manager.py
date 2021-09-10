@@ -20,8 +20,8 @@ from trading.brain.position import (DesiredLimitBuy, PendingLimitBuy,
                                     PendingMarketBuy, DesiredMarketBuy,
                                     Download, RootState)
 from trading.brain.position_counter import PositionCounter
-from trading.brain.position_sizing import limit_limit_buy_size, \
-    limit_market_buy_size, compute_sell_size, adjust_spending_target
+from trading.brain.position_sizing import limit_limit_buy_amounts, \
+    limit_market_buy_amounts, compute_sell_size, adjust_spending_target
 from trading.brain.stop_loss import StopLoss
 from trading.coinbase.helper import get_server_time, AuthenticatedClient
 from trading.helper.functions import overlapping_labels, safely_decimalize
@@ -182,62 +182,47 @@ class PortfolioManager:
         quote_size_limits = self.prices * base_size_limits
         return quote_size_limits.fillna(Decimal('0'))
 
-    def apply_size_limits(self, weights: pd.Series,
-                          spending_limit: Decimal) -> pd.Series:
+    def apply_portfolio_limits(self, amounts: pd.Series) -> pd.Series:
         """
-        Applies position size limits to the weights.
-        Ensures the returned weights would not cause exceeding position limits.
-        :param weights: the initial weights
-        :param spending_limit: the amount we can spend
-        :return:
+        Upper limits returned amounts to spending limits
+        :param amounts: the starting amounts
+        :return: amounts not exceeding the portfolio limits
         """
-        weight_limits = self.spending_limits / spending_limit
-        weights, weight_limits = overlapping_labels(weights, weight_limits)
-        weights = weights.where(weights < weight_limits, weight_limits)
-        weights = weights[weights.notna() & weights.gt(0.)]
-        return weights
+        amount_limits = self.spending_limits
+        amounts, amount_limits = overlapping_labels(amounts, amount_limits)
+        amounts = amounts.where(amounts < amount_limits, amount_limits)
+        amounts = amounts[amounts.notna() & amounts.gt(0.)]
+        return amounts
 
-    def apply_exchange_size_limits(self, weights: pd.Series,
-                                   spending_limit: Decimal) -> pd.Series:
-        spending_limit = float(spending_limit)
-        weights = weights.map(float)
+    def apply_exchange_limits(self, amounts: pd.Series) -> pd.Series:
+        amounts = amounts.map(float)
+        market_info = pd.DataFrame(self.market_info).transpose()
         if self.buy_order_type == 'market':
-            min_market_funds = pd.Series(
-                {product: float(info['min_market_funds'])
-                 for product, info in self.market_info.items()})
-            weights = limit_market_buy_size(spending_limit, weights,
-                                            min_market_funds)
+            min_market_funds = pd.to_numeric(market_info['min_market_funds'])
+            amounts = limit_market_buy_amounts(amounts, min_market_funds)
         else:
-            base_min_sizes = pd.Series(
-                {product: float(info['base_min_size'])
-                 for product, info in self.market_info.items()})
-            weights = limit_limit_buy_size(spending_limit, weights,
-                                           self.bids.map(float),
-                                           base_min_sizes)
-        return weights.fillna(0.).map(Decimal)
+            base_min_sizes = pd.to_numeric(market_info['base_min_size'])
+            amounts = limit_limit_buy_amounts(amounts,
+                                              self.bids.map(float),
+                                              base_min_sizes)
+        return amounts.fillna(0.).map(Decimal)
 
-    def limit_weights(self, target_weights: Series,
-                      spending_limit: Decimal) -> Series:
-        nil_weights = Series([], dtype=np.float64)
-        filtered_weights = self.filter_weights(target_weights)
-        if not len(filtered_weights):
-            return nil_weights
-        limited_weights = self.apply_size_limits(filtered_weights,
-                                                 spending_limit)
-        if not len(limited_weights):
-            return nil_weights
-        ranked_weights = limited_weights.sort_values(ascending=False)
-        weights = self.apply_exchange_size_limits(ranked_weights,
-                                                  spending_limit)
-        logger.debug(weights)
-        return weights
+    def limit_amounts(self, amounts: Series) -> Series:
+        nil_amounts = Series([], dtype=np.float64)
+        filtered_amounts = self.filter_amounts(amounts)
+        if not len(filtered_amounts):
+            return nil_amounts
+        limited_amounts = self.apply_portfolio_limits(filtered_amounts)
+        if not len(limited_amounts):
+            return nil_amounts
+        amounts = self.apply_exchange_limits(limited_amounts)
+        return amounts
 
-    def filter_weights(self, target_weights: pd.Series) -> pd.Series:
-        overheated = filter(self.cool_down.cooling_down, target_weights.index)
+    def filter_amounts(self, amounts: pd.Series) -> pd.Series:
+        overheated = filter(self.cool_down.cooling_down, amounts.index)
         not_allowed = set(overheated) | set(self.blacklist)
-        allowed = target_weights.index.difference(not_allowed)
-        filtered_weights = target_weights.loc[allowed]
-        return filtered_weights
+        allowed = amounts.index.difference(not_allowed)
+        return amounts.loc[allowed]
 
     def queue_buys(self) -> None:
         """
@@ -251,20 +236,19 @@ class PortfolioManager:
         """
         budget = self.portfolio_available_funds
         spending_limit = budget / (Decimal('1') + self.taker_fee)
-        weights = self.limit_weights(self.buy_weights, spending_limit)
-        decimal_weights = weights.fillna(0.).map(Decimal)
-        for market, weight in decimal_weights.iteritems():
+        amounts = self.limit_amounts(self.buy_weights * spending_limit)
+        for market, amount in amounts.iteritems():
             if market not in self.market_info:
                 continue
             assert isinstance(market, str)
+            assert isinstance(amount, Decimal)
             self.counter.increment()
             previous_state = RootState(market=market,
                                        number=self.counter.monotonic_count)
-            state_change = f'buy target {weight:.2f}'
-            funds = Decimal(weight) * spending_limit
+            state_change = f'buy target ${amount:.2f}'
             if self.buy_order_type == 'limit' and market in self.bids:
                 price = self.bids[market]
-                size = funds / price
+                size = amount / price
                 buy = DesiredLimitBuy(price=price,
                                       size=size,
                                       market=market,
@@ -273,7 +257,7 @@ class PortfolioManager:
                 logger.debug(buy)
                 self.desired_limit_buys.append(buy)
             elif self.buy_order_type == 'market':
-                buy = DesiredMarketBuy(funds=funds, market=market,
+                buy = DesiredMarketBuy(funds=(amount), market=market,
                                        previous_state=previous_state,
                                        state_change=state_change)
                 logger.debug(buy)

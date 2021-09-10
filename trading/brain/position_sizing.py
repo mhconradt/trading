@@ -1,4 +1,5 @@
 import random
+import typing as t
 from decimal import Decimal
 
 import numpy as np
@@ -7,44 +8,56 @@ import pandas as pd
 from trading.helper.functions import overlapping_labels
 
 
-def limit_limit_buy_size(spending_limit: float, weights: pd.Series,
-                         prices: pd.Series,
-                         min_sizes: pd.Series) -> pd.Series:
-    total_weight = np.sum(weights)
-    sorted_weights = weights.sort_values(ascending=False)
-    max_above_limit, best_weights = 0, pd.Series([], dtype=np.float64)
-    for market in sorted_weights.index:
-        these_weights = sorted_weights.loc[:market]
-        these_weights = these_weights / these_weights.sum() * total_weight
-        these_amounts = these_weights * spending_limit
-        these_sizes = these_amounts / prices
-        these_sizes, min_sizes = overlapping_labels(these_sizes, min_sizes)
-        large_enough = these_sizes > min_sizes
-        these_amounts, large_enough = overlapping_labels(these_amounts,
-                                                         large_enough)
-        above_limit = these_amounts[large_enough]
-        if len(above_limit) > max_above_limit:
-            max_above_limit = len(above_limit)
-            best_weights = above_limit / above_limit.sum() * total_weight
-    return best_weights
+def limit_limit_buy_amounts(amounts: pd.Series, prices: pd.Series,
+                            min_sizes: pd.Series,
+                            probabilistic: bool = False) -> pd.Series:
+    if probabilistic:
+        return probabilistic_limit_buy_amounts(amounts, prices, min_sizes)
+    else:
+        return deterministic_limit_buy_amounts(amounts, prices, min_sizes)
 
 
-def limit_market_buy_size(spending_limit: float, weights: pd.Series,
-                          min_market_funds: pd.Series) -> pd.Series:
-    total_weight = np.sum(weights)
-    sorted_weights = weights.sort_values(ascending=False)
-    max_above_limit, best_weights = 0, pd.Series([], dtype=np.float64)
-    for market in sorted_weights.index:
-        these_weights = sorted_weights.loc[:market]
-        these_weights = these_weights / these_weights.sum() * total_weight
-        these_amounts = these_weights * spending_limit
-        these_amounts, min_market_funds = overlapping_labels(these_amounts,
-                                                             min_market_funds)
-        above_limit = these_amounts[these_amounts > min_market_funds]
-        if len(above_limit) > max_above_limit:
-            max_above_limit = len(above_limit)
-            best_weights = above_limit / above_limit.sum() * total_weight
-    return best_weights
+def deterministic_limit_buy_amounts(amounts: pd.Series, prices: pd.Series,
+                                    min_sizes: pd.Series) -> pd.Series:
+    sizes = amounts / prices
+    sizes, min_sizes = overlapping_labels(sizes, min_sizes)
+    return (sizes[sizes > min_sizes] * prices).dropna()
+
+
+def probabilistic_limit_buy_amounts(amounts: pd.Series, prices: pd.Series,
+                                    min_sizes: pd.Series) -> pd.Series:
+    sizes = amounts / prices
+    sizes, min_sizes = overlapping_labels(sizes, min_sizes)
+    p = sizes / min_sizes
+    n = len(sizes)
+    randomized_size = t.cast(np.array, np.random.rand(n) < p).astype(float)
+    new_size = sizes.where(sizes >= min_sizes, randomized_size)
+    return new_size * prices
+
+
+def limit_market_buy_amounts(amounts: pd.Series,
+                             min_market_funds: pd.Series,
+                             probabilistic: bool = False) -> pd.Series:
+    if probabilistic:
+        return probabilistic_market_buy_amounts(amounts, min_market_funds)
+    else:
+        return deterministic_market_buy_amounts(amounts, min_market_funds)
+
+
+def deterministic_market_buy_amounts(amounts: pd.Series,
+                                     min_funds: pd.Series) -> pd.Series:
+    amounts, min_funds = overlapping_labels(amounts, min_funds)
+    return amounts[amounts > min_funds]
+
+
+def probabilistic_market_buy_amounts(amounts: pd.Series,
+                                     min_funds: pd.Series) -> pd.Series:
+    amounts, min_funds = overlapping_labels(amounts, min_funds)
+    p = amounts / min_funds
+    n = len(amounts)
+    randomized_funds = t.cast(np.array, np.random.rand(n) < p).astype(float)
+    new_funds = amounts.where(amounts >= min_funds, randomized_funds)
+    return new_funds
 
 
 def _compute_sell_size1(size: Decimal, fraction: Decimal,
@@ -99,5 +112,5 @@ def adjust_spending_target(targets: pd.Series,
     return weights.fillna(0.).map(Decimal)
 
 
-__all__ = ['limit_limit_buy_size', 'limit_market_buy_size',
+__all__ = ['limit_limit_buy_amounts', 'limit_market_buy_amounts',
            'adjust_spending_target', 'compute_sell_size']
