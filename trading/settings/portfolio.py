@@ -11,3 +11,4 @@ QUOTE = env.str('QUOTE', 'USD')
 MIN_TICK_TIME = env.float('MIN_TICK_TIME', 0.)
 STOP_LOSS_COOLDOWN = env.timedelta('COOLDOWN_SECONDS', timedelta(hours=1),
                                    precision='seconds')
+CONCENTRATION_LIMIT = env.float('CONCENTRATION_LIMIT', 0.2)

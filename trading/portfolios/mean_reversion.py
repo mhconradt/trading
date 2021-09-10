@@ -145,6 +145,7 @@ def main() -> None:
                                        api_passphrase=cb_settings.PASSPHRASE,
                                        ignore_untracked=False)
         min_tick_time = portfolio_settings.MIN_TICK_TIME
+        concentration_limit = portfolio_settings.CONCENTRATION_LIMIT
         manager = PortfolioManager(coinbase, candles_src,
                                    buy_indicator=buy_indicator,
                                    sell_indicator=sell_indicator,
@@ -164,7 +165,8 @@ def main() -> None:
                                    post_only=True, sell_order_type='limit',
                                    buy_order_type='limit',
                                    buy_horizon=strategy_settings.BUY_HORIZON,
-                                   min_tick_time=min_tick_time)
+                                   min_tick_time=min_tick_time,
+                                   concentration_limit=concentration_limit)
         signal.signal(signal.SIGTERM, lambda _, __: manager.shutdown())
         try:
             manager.run()
