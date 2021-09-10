@@ -171,10 +171,13 @@ def main() -> None:
         except KeyboardInterrupt:
             break
         except (Exception,):
-            if time.time() - outer_tick_start < 60 or manager.stop:
+            if time.time() - outer_tick_start < 60:
                 break
         finally:
+            externally_killed = manager.stop
             manager.shutdown()
+            if externally_killed:
+                break
     sys.exit(1)
 
 
