@@ -5,8 +5,25 @@ import numpy as np
 import pandas as pd
 from influxdb_client import InfluxDBClient
 
+from trading.helper.functions import overlapping_labels
 from trading.helper.ttl_cache import ttl_cache
 from trading.indicators.market_fraction import MarketFraction
+
+
+def std(a: np.array, w: np.array) -> float:
+    w /= w.sum()
+    expected_value = (a * w).sum()
+    return np.sqrt(np.sum(w * (a - expected_value) ** 2))
+
+
+def compute_index(multiples: np.array, weights: np.array) -> np.array:
+    multiples, weights = overlapping_labels(multiples.dropna(), weights)
+    # only use large markets in index computation
+    log_multiples = np.log(multiples)
+    sigma = std(log_multiples, weights)
+    mean = np.average(log_multiples, weights=weights)
+    indices = (log_multiples - mean) / sigma
+    return indices
 
 
 class RelativeMMI:
@@ -46,18 +63,8 @@ class RelativeMMI:
                                              data_frame_index=['market'])
         stop_price = stop_df['_value']
         weights = self.market_fraction.compute()
-        large_markets = weights[weights > 0.01].index
         multiples = stop_price / start_price
-        # only use large markets in index computation
-        mmi = np.average(multiples[large_markets],
-                         weights=weights[large_markets])
-        print(mmi)
-        # prevent exploding values
-        mmi = 1.001 if 1 < mmi < 1.001 else 0.999 if 1 > mmi > 0.999 else mmi
-        base = np.log(mmi)
-        base *= np.sign(base)
-        indices = np.log(multiples) / base
-        return indices
+        return compute_index(multiples, weights)
 
 
 def describe(indices: pd.Series) -> None:
@@ -72,18 +79,18 @@ def main(influx: InfluxDBClient) -> None:
                                      'USD')
     r_mmi5 = RelativeMMI(influx, market_fraction, timedelta(minutes=5),
                          timedelta(minutes=1), 'USD')
-    r_mmi15 = RelativeMMI(influx, market_fraction, timedelta(minutes=15),
-                          timedelta(minutes=1), 'USD')
-    r_mmi10 = RelativeMMI(influx, market_fraction, timedelta(minutes=10),
-                          timedelta(minutes=1), 'USD')
-    for _ in range(60):
-        i5 = r_mmi5.compute().rename('rmmi5')
-        describe(i5)
-        i15 = r_mmi15.compute().rename('rmmi15')
-        describe(i15)
-        i10 = r_mmi10.compute().rename('rmmi10')
-        describe(i10)
-        time.sleep(60)
+    r_mmi3 = RelativeMMI(influx, market_fraction, timedelta(minutes=3),
+                         timedelta(minutes=1), 'USD')
+    while True:
+        i5 = r_mmi5.compute()
+        i3 = r_mmi3.compute()
+        df = pd.DataFrame({'rmmi3': i3, 'rmmi5': i5})
+        print(df.describe())
+        extremes = pd.DataFrame({'idxmin': df.idxmin(), 'min': df.min(),
+                                 'idxmax': df.idxmax(), 'max': df.max(), })
+        print(extremes)
+        print(df.loc[['SOL-USD', 'ETH-USD', 'BTC-USD', 'ADA-USD', 'ICP-USD']])
+        time.sleep(30)
 
 
 if __name__ == '__main__':

@@ -28,11 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 def combine_signals(mean_reversion: np.array, rmmi: np.array) -> np.array:
-    lower, upper = rmmi.quantile([0.1, 0.9])
-    # mathematically between -2 and 2. between -1 and 1 to extent symmetric.
-    standard_rmmi = min_max(lower, rmmi, upper) / ((upper - lower) / 2)
-    # anything between halving or doubling the effect
-    trimmed_rmmi = min_max(-mean_reversion / 2, standard_rmmi, mean_reversion)
+    # anything between cancelling out and doubling effect.
+    trimmed_rmmi = min_max(-mean_reversion, rmmi, mean_reversion)
     return mean_reversion + trimmed_rmmi
 
 
