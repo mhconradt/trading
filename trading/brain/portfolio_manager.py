@@ -54,8 +54,10 @@ class PortfolioManager:
                  sell_order_type: str = 'limit', buy_order_type: str = 'limit',
                  buy_horizon=timedelta(minutes=10),
                  min_tick_time: float = 0.,
-                 concentration_limit: float = 0.25):
+                 concentration_limit: float = 0.25,
+                 probabilistic_buying: bool = False):
         # COINBASE CLIENT
+        self.probabilistic_buying = probabilistic_buying
         self.exchange = exchange_client
         # SPENDING DIRECTIVES
         self.quote = quote
@@ -199,12 +201,14 @@ class PortfolioManager:
         market_info = pd.DataFrame(self.market_info).transpose()
         if self.buy_order_type == 'market':
             min_market_funds = pd.to_numeric(market_info['min_market_funds'])
-            amounts = limit_market_buy_amounts(amounts, min_market_funds)
+            amounts = limit_market_buy_amounts(amounts, min_market_funds,
+                                               self.probabilistic_buying)
         else:
             base_min_sizes = pd.to_numeric(market_info['base_min_size'])
             amounts = limit_limit_buy_amounts(amounts,
                                               self.bids.map(float),
-                                              base_min_sizes)
+                                              base_min_sizes,
+                                              self.probabilistic_buying)
         return amounts.fillna(0.).map(Decimal)
 
     def limit_amounts(self, amounts: Series) -> Series:
