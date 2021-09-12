@@ -82,9 +82,10 @@ def main(influx: InfluxDBClient) -> None:
     r_mmi3 = RelativeMMI(influx, market_fraction, timedelta(minutes=3),
                          timedelta(minutes=1), 'USD')
     while True:
+        fractions = market_fraction.compute()
         i5 = r_mmi5.compute()
         i3 = r_mmi3.compute()
-        df = pd.DataFrame({'rmmi3': i3, 'rmmi5': i5})
+        df = pd.DataFrame({'rmmi3': i3, 'rmmi5': i5, 'fraction': fractions})
         print(df.describe())
         extremes = pd.DataFrame({'idxmin': df.idxmin(), 'min': df.min(),
                                  'idxmax': df.idxmax(), 'max': df.max(), })

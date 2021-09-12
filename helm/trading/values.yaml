@@ -63,10 +63,11 @@ blue_trader:
         MR_SELL_FRACTION: "0.833"
         STOP_LOSS: "0.98"
         COOLDOWN_SECONDS: 3600
-        BUY_TARGET_SECONDS: 300
+        BUY_TARGET_SECONDS: 180
         SELL_TARGET_SECONDS: 300
         RMMI_SECONDS: 300
         CONCENTRATION_LIMIT: 0.166
+        PROBABILISTIC_BUYING: 1
 
 red_trader:
     nameOverride: "red-trader"
@@ -81,7 +82,7 @@ red_trader:
         tag: "2.0.23"
     extraEnv:
         MR_EMA_PERIODS: "30"
-        MR_BUY_FRACTION: "0.4"
+        MR_BUY_FRACTION: "0.5"
         MR_SELL_FRACTION: "0.833"
         STOP_LOSS: "0.98"
         COOLDOWN_SECONDS: 3600
@@ -89,3 +90,4 @@ red_trader:
         SELL_TARGET_SECONDS: 300
         RMMI_SECONDS: 300
         CONCENTRATION_LIMIT: 0.125
+        PROBABILISTIC_BUYING: 1
