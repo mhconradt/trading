@@ -31,19 +31,21 @@ def wait_for_public_rate_limit() -> None:
 
 class PublicClient(cbpro.PublicClient):
     def get_products(self) -> t.List[dict]:
-        wait_for_public_rate_limit()
         return super(PublicClient, self).get_products()
 
     def get_time(self) -> dict:
-        wait_for_public_rate_limit()
         return super(PublicClient, self).get_time()
 
     def get_product_trades(self, product_id, before='', after='', limit=None,
                            result=None) -> t.Iterator[dict]:
-        wait_for_public_rate_limit()
-        return super(PublicClient, self).get_product_trades(product_id, before,
-                                                            after, limit,
-                                                            result)
+        params = {}
+        if before:
+            params['before'] = before
+        if after:
+            params['after'] = after
+        endpoint = f'/products/{product_id}/trades'
+        return super(PublicClient, self)._send_paginated_message(endpoint,
+                                                                 params=params)
 
     def _reset_session(self) -> None:
         self.session = requests.Session()
@@ -53,6 +55,10 @@ class PublicClient(cbpro.PublicClient):
         retryable = method == 'GET' or method == 'DELETE'
         while True:
             try:
+                if isinstance(self, AuthenticatedClient):
+                    wait_for_authenticated_rate_limit()
+                else:
+                    wait_for_public_rate_limit()
                 url = self.url + endpoint
                 r = self.session.request(method, url, params=params, data=data,
                                          auth=self.auth, timeout=30)
@@ -71,14 +77,38 @@ class PublicClient(cbpro.PublicClient):
                 else:
                     raise e  # need to implement retry logic elsewhere
 
+    def _send_paginated_message(self, endpoint, params=None):
+        if params is None:
+            params = dict()
+        url = self.url + endpoint
+        while True:
+            if isinstance(self, AuthenticatedClient):
+                wait_for_authenticated_rate_limit()
+            else:
+                wait_for_public_rate_limit()
+            r = self.session.get(url, params=params, auth=self.auth,
+                                 timeout=30)
+            results = r.json()
+            if isinstance(results, dict):
+                raise ValueError(results)
+            for result in results:
+                yield result
+            # If there are no more pages, we're done. Otherwise update `after`
+            # param to get next page.
+            # If this request included `before` don't get any more pages - the
+            # cbpro API doesn't support multiple pages in that case.
+            if not r.headers.get('cb-after') or \
+                    params.get('before') is not None:
+                break
+            else:
+                params['after'] = r.headers['cb-after']
+
 
 class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
     def get_accounts(self) -> t.List[dict]:
-        wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).get_accounts()
 
     def get_account(self, account_id) -> dict:
-        wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).get_account(account_id)
 
     def place_limit_order(self, product_id, side, price, size,
@@ -89,7 +119,6 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
                           post_only=None,
                           overdraft_enabled=None,
                           funding_amount=None) -> dict:
-        wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient,
                      self).place_limit_order(product_id,
                                              side=side,
@@ -108,7 +137,6 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
                            stp=None,
                            overdraft_enabled=None,
                            funding_amount=None) -> dict:
-        wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient,
                      self).place_market_order(product_id,
                                               side=side,
@@ -120,29 +148,23 @@ class AuthenticatedClient(PublicClient, cbpro.AuthenticatedClient):
                                               funding_amount=funding_amount)
 
     def cancel_order(self, order_id) -> t.List[str]:
-        wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).cancel_order(order_id)
 
     def cancel_all(self, product_id=None):
-        wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).cancel_all(product_id)
 
     def get_order(self, order_id) -> dict:
-        wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).get_order(order_id)
 
     def get_orders(self, product_id=None, status=None,
                    **kwargs) -> t.Iterator[dict]:
-        wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self).get_orders(product_id,
                                                            status=status)
 
     def get_fees(self) -> dict:
-        wait_for_authenticated_rate_limit()
         return super(AuthenticatedClient, self)._send_message('GET', '/fees')
 
     def get_order_by_client_oid(self, client_oid: str) -> t.Optional[dict]:
-        wait_for_authenticated_rate_limit()
         url = f'{self.url}/orders/client:{client_oid}'
         response = requests.get(url, auth=self.auth)
         status_code = response.status_code
@@ -203,3 +225,8 @@ def get_server_time() -> datetime:
         # if (milliseconds % seconds) == 0 the API returns invalid JSON
         except json.JSONDecodeError:
             continue
+
+
+if __name__ == '__main__':
+    while True:
+        time.sleep(1)

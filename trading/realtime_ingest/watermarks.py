@@ -2,9 +2,8 @@ import typing as t
 from datetime import datetime
 
 import dateutil.parser
-import requests
 
-from trading.coinbase.helper import wait_for_public_rate_limit, PublicClient
+from trading.coinbase.helper import PublicClient
 
 public_client = PublicClient()
 
@@ -44,10 +43,7 @@ def find_trade_id(product_id: str, to: datetime) -> int:
 
 
 def get_timestamp(product_id: str, trade_id: int) -> datetime:
-    params = {'before': trade_id - 1, 'after': trade_id + 1}
-    wait_for_public_rate_limit()
-    trades = requests.get(
-        f"https://api.pro.coinbase.com/products/{product_id}/trades",
-        params).json()
+    trades = public_client.get_product_trades(product_id, before=trade_id - 1,
+                                              after=trade_id + 1)
     trade, = trades
     return dateutil.parser.parse(trade['time'])
