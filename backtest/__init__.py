@@ -58,7 +58,7 @@ def simulate(fiat: float, buy_fraction: np.array, sell_fraction: np.array,
         sell_sizes[t % sell_expiration] = sell_base_amount
         sell_prices[t % sell_expiration] = order_price
         continue
-    return fiat + balance @ order_price
+    return fiat + (balance @ order_price) / (1 + fee)
 
 
 def generate_price(t: int, mean: float, std: float) -> np.array:
@@ -73,7 +73,7 @@ def main() -> None:
     np.random.seed(42)
     m = 64
     t = 86400
-    fee = 0.
+    fee = 0.0008
     expiration = 15
     buy_fraction = (1 - (1 - np.random.rand(t, m)) ** (1 / 300)) / m
     # buy_fraction = np.ones((t, m)) / m
