@@ -44,7 +44,9 @@ def simulate(fiat: float, buy_fraction: np.array, sell_fraction: np.array,
         fiat += proceeds * (1 - fee)
         sell_sizes *= ~sell_fills
         # expiration
-        balance += sell_sizes[t % sell_expiration]
+        retry = sell_fraction[t] > 0.
+        retry_base_amount = retry * sell_sizes[t % sell_expiration]
+        balance += ~retry * sell_sizes[t % sell_expiration]
         fiat += buy_sizes[t % buy_expiration] @ buy_prices[t % buy_expiration]
         # buys -> holds
         buy_quote_amount = fiat * buy_fraction[t]
@@ -55,7 +57,7 @@ def simulate(fiat: float, buy_fraction: np.array, sell_fraction: np.array,
         # sells -> holds
         sell_base_amount = balance * sell_fraction[t]
         balance -= sell_base_amount
-        sell_sizes[t % sell_expiration] = sell_base_amount
+        sell_sizes[t % sell_expiration] = sell_base_amount + retry_base_amount
         sell_prices[t % sell_expiration] = order_price
         continue
     return fiat + (balance @ order_price) / (1 + fee)
